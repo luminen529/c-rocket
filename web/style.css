@@ -1,0 +1,262 @@
+:root {
+    color-scheme: dark;
+    --background: #08111f;
+    --surface: #101c2f;
+    --surface-border: #263752;
+    --text: #eef4ff;
+    --muted: #9cacbf;
+    --unsafe: #ff6b6b;
+    --safe: #52d6a4;
+    --normal: #82a8d8;
+    --window: #8fd7ff;
+    --flame: #ffb84d;
+    --flame-hot: #fff1a6;
+    --explosion: #ff8a3d;
+    --explosion-core: #ffe36e;
+    --smoke: #718096;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    min-width: 320px;
+    margin: 0;
+    background:
+        radial-gradient(circle at 50% -20%, #173258 0, transparent 46%),
+        var(--background);
+    color: var(--text);
+    font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+}
+
+button,
+input {
+    font: inherit;
+}
+
+.simulator {
+    width: min(1180px, calc(100% - 32px));
+    margin: 0 auto;
+    padding: 28px 0 36px;
+}
+
+.topbar,
+.flight-panel header,
+.controls {
+    display: flex;
+    align-items: center;
+}
+
+.topbar {
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 18px;
+}
+
+h1,
+h2,
+p {
+    margin: 0;
+}
+
+h1 {
+    font-size: clamp(1.25rem, 3vw, 1.8rem);
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+h2 {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+}
+
+#current-time {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+}
+
+.flight-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.flight-panel {
+    overflow: hidden;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    border: 1px solid var(--surface-border);
+    border-radius: 16px;
+}
+
+.flight-panel header {
+    justify-content: space-between;
+    padding: 16px 18px 8px;
+}
+
+.status {
+    color: var(--normal);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+}
+
+.status.safe-mode {
+    color: var(--safe);
+}
+
+.status.failed {
+    color: var(--unsafe);
+}
+
+.flight-panel svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+}
+
+.ground {
+    stroke: var(--surface-border);
+    stroke-width: 2;
+}
+
+.trajectory {
+    fill: none;
+    stroke-width: 3;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.rocket-body,
+.rocket-fin,
+.rocket-nozzle {
+    stroke: currentColor;
+    stroke-width: 1.8;
+    stroke-linejoin: round;
+    fill: var(--surface);
+}
+
+.rocket-window {
+    fill: var(--window);
+    stroke: currentColor;
+    stroke-width: 1.5;
+}
+
+.rocket-flame {
+    fill: var(--flame);
+    stroke: var(--flame-hot);
+    stroke-width: 1.3;
+    transform-origin: 0 20px;
+}
+
+.unsafe-panel .trajectory,
+.unsafe-panel .rocket {
+    color: var(--unsafe);
+    stroke: var(--unsafe);
+}
+
+.safe-panel .trajectory,
+.safe-panel .rocket {
+    color: var(--safe);
+    stroke: var(--safe);
+}
+
+.explosion,
+.wreckage {
+    opacity: 0;
+    pointer-events: none;
+}
+
+.explosion-burst {
+    fill: var(--explosion);
+    stroke: var(--explosion-core);
+    stroke-width: 2;
+}
+
+.explosion-core {
+    fill: var(--explosion-core);
+}
+
+.debris-pieces path,
+.wreckage > path:first-child {
+    fill: var(--unsafe);
+    stroke: var(--text);
+    stroke-width: 1;
+}
+
+.smoke {
+    fill: none;
+    stroke: var(--smoke);
+    stroke-width: 7;
+    stroke-linecap: round;
+    opacity: 0.65;
+}
+
+.controls {
+    gap: 12px;
+    margin-top: 18px;
+    padding: 14px 16px;
+    background: var(--surface);
+    border: 1px solid var(--surface-border);
+    border-radius: 12px;
+}
+
+.controls button {
+    min-width: 70px;
+    padding: 8px 14px;
+    border: 1px solid var(--surface-border);
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+}
+
+.controls button:hover {
+    border-color: var(--muted);
+}
+
+.controls button:focus-visible,
+.controls input:focus-visible {
+    outline: 2px solid var(--normal);
+    outline-offset: 3px;
+}
+
+.controls label {
+    color: var(--muted);
+    font-size: 0.9rem;
+}
+
+.controls input {
+    flex: 1;
+    min-width: 100px;
+    accent-color: var(--normal);
+}
+
+.load-error {
+    margin-top: 16px;
+    color: var(--unsafe);
+}
+
+@media (max-width: 720px) {
+    .flight-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .controls {
+        flex-wrap: wrap;
+    }
+
+    .controls input {
+        flex-basis: 100%;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+    }
+}
