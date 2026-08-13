@@ -429,28 +429,29 @@ static void print_step_log(SimulationMode mode,
     }
 }
 
+// 시뮬레이션 실행 함수
 static int run_simulation(SimulationMode mode, const char *file_name)
 {
+    // 선언과 init
+    /*
+     * 파일은 FILE 구조체의 특성상 포인터 변수로 참조한다. *file로 "file"이라는 포인터 변수 선언
+     * fopen() 함수는 파일을 열고 FILE 구조체를 반환하며, 이 구조체는 파일에 대한 정보를 담고 있다. 'w'는 쓰기 모드
+     * fopen(filename, mode)
+     */
     FILE *file = fopen(file_name, "w");
     RocketState rocket;
     GuidanceSystem system;
-    int step;
-
+    int step;  // 반복 횟수 = 시뮬레이션 시간
+    // file을 불러올 수 없을 떄 exit 예외처리
     if (file == NULL) {
         fprintf(stderr, "Cannot open output file: %s\n", file_name);
-        return 0;
+        return 1;
     }
-
     init_rocket(&rocket);
     init_guidance(&system, mode);
     write_csv_header(file);
-    printf("\n=== %s MODE ===\n", mode_name(mode));
+    printf("\n=== SITUATION: %s ===\n", mode_name(mode));
 
-    /*
-     * SAFE와 UNSAFE가 공통으로 사용하는 시간 루프다.
-     * 실제 차이는 run_sri()의 변환 처리와 run_obc()의 입력 해석에서 발생한다.
-     * 매 시점마다 센서 -> OBC -> 제어 -> 로그/CSV 순서로 상태를 기록한다.
-     */
     for (step = 0; step <= TOTAL_TIME; ++step) {
         SensorData sensor = run_sri(&system, &rocket, mode);
 
@@ -465,7 +466,7 @@ static int run_simulation(SimulationMode mode, const char *file_name)
     }
 
     fclose(file);
-    return 1;
+    return 0;
 }
 
 // 변환값 테스트 함수
@@ -539,8 +540,9 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Usage: %s [--test]\n", argv[0]);
         return 1;
     }
-    // if문을 통해 시뮬레이션 실행, 실패 시 1 반환
-    if (!run_simulation(MODE_UNSAFE, "output/unsafe.csv")) {
+    // run_simulation() 이 종료코드 '1'(오류)를 반환하면 종료코드 1로 종료
+    // if 내부에서 0 = F, 1 = T
+    if (run_simulation(MODE_UNSAFE, "output/unsafe.csv")) {
         return 1;
     }
     if (!run_simulation(MODE_SAFE, "output/safe.csv")) {
