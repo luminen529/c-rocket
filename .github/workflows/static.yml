@@ -1,0 +1,63 @@
+name: Deploy C Rocket simulation to GitHub Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Build and validate simulation data
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build output
+          gcc -std=c11 -Wall -Wextra -Wpedantic src/main.c -o build/c-rocket
+          ./build/c-rocket --test
+          ./build/c-rocket
+
+          test "$(wc -l < output/unsafe.csv)" -eq 62
+          test "$(wc -l < output/safe.csv)" -eq 62
+          awk -F, '$2 == 37 && $NF == "CONTROL_LOST" { found = 1 } END { exit !found }' output/unsafe.csv
+          awk -F, '$2 == 39 && $NF == "FAILED" { found = 1 } END { exit !found }' output/unsafe.csv
+          awk -F, '$2 == 60 && $NF == "NORMAL" && $4 > 0 { found = 1 } END { exit !found }' output/safe.csv
+
+      - name: Prepare Pages artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p site/output
+          cp web/index.html web/app.js web/style.css site/
+          cp output/unsafe.csv output/safe.csv site/output/
+          sed -i 's#\.\./output/#output/#g' site/app.js
+          touch site/.nojekyll
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
