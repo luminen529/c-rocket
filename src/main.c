@@ -4,16 +4,17 @@
 #include <string.h>
 
 #define TOTAL_TIME 60
-#define DT 1.0
+#define DT 1.0  // 갱신 간격
 
-/* The flight dynamics are intentionally simple educational values. */
+// 시뮬레이션 상수 -> 단순화됨
 #define HORIZONTAL_ACCELERATION 30.0
 #define VERTICAL_ACCELERATION 5.0
-#define BIAS_SCALE 30.0
-#define ABNORMAL_TURN_RATE 12.0
-#define ANGLE_OF_ATTACK_LIMIT 20.0
+#define BIAS_SCALE 30.0  // 수평 속도 센서 변환 상수
+#define ABNORMAL_TURN_RATE 12.0  // 비정상적인 회전 속도
+#define ANGLE_OF_ATTACK_LIMIT 20.0  // 한계 각도
 
-/* The active SRI fails one 72 ms data cycle after the backup SRI. */
+/* SRI는 프랑스어 Système de Référence Inertielle의 약자로, 영어로는 Inertial Reference System,
+ * 한국어로는 관성 기준 장치입니다.(?) -> 실패 이벤트 발생 관련 정의인듯*/
 #define SRI_CYCLE_SECONDS 0.072
 #define ACTIVE_SRI_FAILURE_TIME 37.0
 #define BACKUP_SRI_FAILURE_TIME \
@@ -21,8 +22,8 @@
 #define BREAKUP_TIME 39.0
 
 typedef enum {
-    MODE_UNSAFE,
-    MODE_SAFE
+    MODE_UNSAFE,  // 이륙 후에도 정렬 작업을 계속 실행하는 사고 경로
+    MODE_SAFE  // 이륙 후 정렬 작업을 시작하지 않고 방어적으로 차단하는 정상 경로(예외처리가 적용됨?)
 } SimulationMode;
 
 typedef enum {
@@ -63,7 +64,7 @@ typedef struct {
     double vertical_velocity;
     double angle;
     SystemStatus status;
-} RocketState;
+} RocketState;  // 로케트 상태 구조체
 
 typedef struct {
     int bias_calculated;
@@ -81,6 +82,7 @@ typedef struct {
     NozzleCommand nozzle_command;
 } GuidanceSystem;
 
+// ----- 시뮬레이션 모드와 상태를 문자열로 변환하는 헬퍼 함수 -----
 static const char *mode_name(SimulationMode mode)
 {
     return mode == MODE_UNSAFE ? "UNSAFE" : "SAFE";
@@ -141,6 +143,7 @@ static const char *sri_status_name(const SRIState *sri)
     return sri->operational ? "RUNNING" : "STOPPED";
 }
 
+// ----- 시뮬레이션 init -----
 static void init_rocket(RocketState *rocket)
 {
     rocket->time = 0.0;
@@ -155,7 +158,6 @@ static void init_rocket(RocketState *rocket)
 static void init_sri(SRIState *sri, SimulationMode mode)
 {
     sri->operational = 1;
-    /* Ariane 5 did not need the inherited alignment task after lift-off. */
     sri->alignment_active = mode == MODE_UNSAFE ? 1 : 0;
     sri->failure_time = -1.0;
 }
@@ -178,10 +180,16 @@ static ConversionResult model_bias_conversion(double value,
                                                int alignment_active,
                                                int16_t *result)
 {
+    /* SAFE 경로: 정렬 작업이 꺼져 있으면 문제가 되는 변환 자체를 실행하지 않는다. */
     if (!alignment_active) {
         return CONVERSION_NOT_RUN;
     }
 
+    /*
+     * 정렬 작업이 실행되는 경우의 범위 검사다.
+     * [UNSAFE] 범위를 넘으면 SRI 프로세서의 Operand Error로 모델링한다.
+     * [SAFE]   범위를 넘는 값을 변환하지 않고 BLOCKED로 차단한다.
+     */
     if (value < (double)INT16_MIN || value > (double)INT16_MAX) {
         return mode == MODE_UNSAFE
                    ? CONVERSION_OPERAND_ERROR
@@ -202,7 +210,14 @@ static void stop_sri(SRIState *sri, double failure_time)
     sri->failure_time = failure_time;
 }
 
-/* Run the active SRI and model the preceding backup-SRI data cycle. */
+/*
+ * 활성 SRI를 실행하고, 한 데이터 주기 앞선 백업 SRI의 상태도 모델링한다.
+ *
+ * 공통 흐름은 다음과 같다.
+ * 1. SRI가 멈췄으면 진단 데이터를 내보낸다.
+ * 2. 정렬 작업이 꺼진 SAFE에서는 정상 비행 데이터가 그대로 유지된다.
+ * 3. 정렬 작업이 켜진 UNSAFE에서는 bias를 계산하고 형변환 결과를 처리한다.
+ */
 static SensorData run_sri(GuidanceSystem *system,
                           const RocketState *rocket,
                           SimulationMode mode)
@@ -214,15 +229,18 @@ static SensorData run_sri(GuidanceSystem *system,
     sensor.valid = 1;
 
     if (!system->sri2_active.operational) {
+        /* 두 SRI가 멈춘 뒤에는 정상 비행 데이터가 아니라 진단 패턴이 나온다. */
         sensor.output_kind = DATA_DIAGNOSTIC;
         sensor.valid = 0;
         return sensor;
     }
 
     if (!system->sri2_active.alignment_active) {
+        /* SAFE 경로: 정렬 변환을 실행하지 않고 유효한 비행 데이터를 유지한다. */
         return sensor;
     }
 
+    /* UNSAFE 경로: 정렬 작업이 계산한 수평 bias를 16비트 정수로 변환한다. */
     sensor.bias_calculated = 1;
     sensor.raw_bias = rocket->horizontal_velocity * BIAS_SCALE;
     sensor.conversion_result = model_bias_conversion(
@@ -237,11 +255,16 @@ static SensorData run_sri(GuidanceSystem *system,
     }
 
     if (sensor.conversion_result == CONVERSION_OPERAND_ERROR) {
+        /*
+         * UNSAFE 사고 경로: 활성 SRI의 변환 오류와 그보다 72 ms 앞선
+         * 백업 SRI의 정지를 함께 기록한다. 따라서 백업 전환도 불가능하다.
+         */
         stop_sri(&system->sri1_backup, BACKUP_SRI_FAILURE_TIME);
         stop_sri(&system->sri2_active, ACTIVE_SRI_FAILURE_TIME);
         sensor.output_kind = DATA_DIAGNOSTIC;
         sensor.valid = 0;
     } else {
+        /* SAFE의 방어 경로 또는 기타 변환 실패: 입력만 무효화하고 SRI는 살린다. */
         sensor.output_kind = DATA_INVALID;
         sensor.valid = 0;
     }
@@ -254,18 +277,23 @@ static void run_obc(GuidanceSystem *system,
                     SimulationMode mode)
 {
     if (sensor->valid && sensor->output_kind == DATA_FLIGHT) {
+        /* 두 모드의 정상 경로: 비행 데이터를 사용하고 노즐은 중립을 유지한다. */
         system->obc_input = DATA_FLIGHT;
         system->nozzle_command = NOZZLE_NEUTRAL;
         return;
     }
 
     if (mode == MODE_UNSAFE && sensor->output_kind == DATA_DIAGNOSTIC) {
-        /* Flight 501 interpreted the active SRI diagnostic pattern as flight data. */
+        /*
+         * UNSAFE 사고 경로: 진단 패턴을 비행 데이터처럼 잘못 받아들인다.
+         * 그 결과 OBC가 노즐을 끝까지 편향시키고 제어 상실을 유발한다.
+         */
         system->obc_input = DATA_DIAGNOSTIC;
         system->nozzle_command = NOZZLE_FULL_DEFLECTION;
         return;
     }
 
+    /* SAFE 경로: 무효하거나 진단용인 입력은 사용하지 않고 노즐을 중립에 둔다. */
     system->obc_input = DATA_INVALID;
     system->nozzle_command = NOZZLE_NEUTRAL;
 }
@@ -277,11 +305,13 @@ static void apply_guidance(RocketState *rocket,
         return;
     }
 
+    /* FULL_DEFLECTION 명령은 위의 UNSAFE OBC 분기에서만 만들어진다. */
     if (system->nozzle_command == NOZZLE_FULL_DEFLECTION &&
         rocket->status == STATUS_NORMAL) {
         rocket->status = STATUS_CONTROL_LOST;
     }
 
+    /* 제어 상실 뒤 자세가 계속 틀어져 받음각 한계를 넘으면 기체가 파괴된다. */
     if (rocket->status == STATUS_CONTROL_LOST &&
         rocket->time >= BREAKUP_TIME &&
         fabs(rocket->angle) > ANGLE_OF_ATTACK_LIMIT) {
@@ -416,6 +446,11 @@ static int run_simulation(SimulationMode mode, const char *file_name)
     write_csv_header(file);
     printf("\n=== %s MODE ===\n", mode_name(mode));
 
+    /*
+     * SAFE와 UNSAFE가 공통으로 사용하는 시간 루프다.
+     * 실제 차이는 run_sri()의 변환 처리와 run_obc()의 입력 해석에서 발생한다.
+     * 매 시점마다 센서 -> OBC -> 제어 -> 로그/CSV 순서로 상태를 기록한다.
+     */
     for (step = 0; step <= TOTAL_TIME; ++step) {
         SensorData sensor = run_sri(&system, &rocket, mode);
 
@@ -433,11 +468,13 @@ static int run_simulation(SimulationMode mode, const char *file_name)
     return 1;
 }
 
+// 변환값 테스트 함수
 static int run_conversion_tests(void)
 {
     int passed = 0;
     int16_t result;
 
+    // UNSAFE의 범위 초과는 OPERAND_ERROR가 되고, SAFE의 범위 초과는 BLOCKED가 되어 출력 변수(result)를 바꾸지 않아야 한다.
     result = 0;
     if (model_bias_conversion(32767.0, MODE_UNSAFE, 1, &result) ==
             CONVERSION_OK &&
@@ -493,19 +530,19 @@ static int run_conversion_tests(void)
 
 int main(int argc, char *argv[])
 {
+    // test모드 활성화 -> 변환 검사
     if (argc == 2 && strcmp(argv[1], "--test") == 0) {
         return run_conversion_tests() ? 0 : 1;
     }
-
+    // 인자 오류 처리
     if (argc != 1) {
         fprintf(stderr, "Usage: %s [--test]\n", argv[0]);
         return 1;
     }
-
+    // if문을 통해 시뮬레이션 실행, 실패 시 1 반환
     if (!run_simulation(MODE_UNSAFE, "output/unsafe.csv")) {
         return 1;
     }
-
     if (!run_simulation(MODE_SAFE, "output/safe.csv")) {
         return 1;
     }
