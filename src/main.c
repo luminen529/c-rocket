@@ -1,3 +1,4 @@
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -5,16 +6,19 @@
 #define TOTAL_TIME 60
 #define DT 1.0
 
+/* The flight dynamics are intentionally simple educational values. */
 #define HORIZONTAL_ACCELERATION 30.0
-#define VERTICAL_ACCELERATION 10.0
-#define FAILED_HORIZONTAL_ACCELERATION 20.0
-#define FAILED_VERTICAL_ACCELERATION -100.0
+#define VERTICAL_ACCELERATION 5.0
+#define BIAS_SCALE 30.0
+#define ABNORMAL_TURN_RATE 12.0
+#define ANGLE_OF_ATTACK_LIMIT 20.0
 
-#define BIAS_SCALE 32.0
-#define TARGET_ANGLE 0.0
-#define DIAGNOSTIC_ANGLE -70.0
-#define ANGLE_LIMIT 45.0
-#define SAFE_CONTROL_CHANGE_LIMIT 5.0
+/* The active SRI fails one 72 ms data cycle after the backup SRI. */
+#define SRI_CYCLE_SECONDS 0.072
+#define ACTIVE_SRI_FAILURE_TIME 37.0
+#define BACKUP_SRI_FAILURE_TIME \
+    (ACTIVE_SRI_FAILURE_TIME - SRI_CYCLE_SECONDS)
+#define BREAKUP_TIME 39.0
 
 typedef enum {
     MODE_UNSAFE,
@@ -23,9 +27,33 @@ typedef enum {
 
 typedef enum {
     STATUS_NORMAL,
-    STATUS_SAFE_MODE,
+    STATUS_CONTROL_LOST,
     STATUS_FAILED
 } SystemStatus;
+
+typedef enum {
+    CONVERSION_NOT_RUN,
+    CONVERSION_OK,
+    CONVERSION_OPERAND_ERROR,
+    CONVERSION_BLOCKED
+} ConversionResult;
+
+typedef enum {
+    DATA_FLIGHT,
+    DATA_DIAGNOSTIC,
+    DATA_INVALID
+} DataKind;
+
+typedef enum {
+    NOZZLE_NEUTRAL,
+    NOZZLE_FULL_DEFLECTION
+} NozzleCommand;
+
+typedef struct {
+    int operational;
+    int alignment_active;
+    double failure_time;
+} SRIState;
 
 typedef struct {
     double time;
@@ -38,25 +66,30 @@ typedef struct {
 } RocketState;
 
 typedef struct {
+    int bias_calculated;
     double raw_bias;
     int16_t converted_bias;
-    int conversion_ok;
-    double reported_angle;
+    ConversionResult conversion_result;
+    DataKind output_kind;
     int valid;
-    int sri_failed;
 } SensorData;
 
-/* 모드 이름을 로그와 CSV에서 사용할 문자열로 바꾼다. */
+typedef struct {
+    SRIState sri1_backup;
+    SRIState sri2_active;
+    DataKind obc_input;
+    NozzleCommand nozzle_command;
+} GuidanceSystem;
+
 static const char *mode_name(SimulationMode mode)
 {
     return mode == MODE_UNSAFE ? "UNSAFE" : "SAFE";
 }
 
-/* 시스템 상태를 사람이 읽을 수 있는 문자열로 바꾼다. */
 static const char *status_name(SystemStatus status)
 {
-    if (status == STATUS_SAFE_MODE) {
-        return "SAFE_MODE";
+    if (status == STATUS_CONTROL_LOST) {
+        return "CONTROL_LOST";
     }
 
     if (status == STATUS_FAILED) {
@@ -66,8 +99,49 @@ static const char *status_name(SystemStatus status)
     return "NORMAL";
 }
 
-/* 로켓의 모든 초기 상태를 0과 정상 상태로 설정한다. */
-static void init_state(RocketState *rocket)
+static const char *conversion_name(ConversionResult result)
+{
+    if (result == CONVERSION_OK) {
+        return "OK";
+    }
+
+    if (result == CONVERSION_OPERAND_ERROR) {
+        return "OPERAND_ERROR";
+    }
+
+    if (result == CONVERSION_BLOCKED) {
+        return "BLOCKED";
+    }
+
+    return "NOT_RUN";
+}
+
+static const char *data_kind_name(DataKind kind)
+{
+    if (kind == DATA_DIAGNOSTIC) {
+        return "DIAGNOSTIC";
+    }
+
+    if (kind == DATA_INVALID) {
+        return "INVALID";
+    }
+
+    return "FLIGHT";
+}
+
+static const char *nozzle_name(NozzleCommand command)
+{
+    return command == NOZZLE_FULL_DEFLECTION
+               ? "FULL_DEFLECTION"
+               : "NEUTRAL";
+}
+
+static const char *sri_status_name(const SRIState *sri)
+{
+    return sri->operational ? "RUNNING" : "STOPPED";
+}
+
+static void init_rocket(RocketState *rocket)
 {
     rocket->time = 0.0;
     rocket->x = 0.0;
@@ -78,236 +152,258 @@ static void init_state(RocketState *rocket)
     rocket->status = STATUS_NORMAL;
 }
 
-/* 16비트 정수로 표현할 수 있을 때만 실제 형변환을 수행한다. */
-static int convert_bias(double value, int16_t *result)
+static void init_sri(SRIState *sri, SimulationMode mode)
 {
-    if (result == NULL) {
-        return 0;
+    sri->operational = 1;
+    /* Ariane 5 did not need the inherited alignment task after lift-off. */
+    sri->alignment_active = mode == MODE_UNSAFE ? 1 : 0;
+    sri->failure_time = -1.0;
+}
+
+static void init_guidance(GuidanceSystem *system, SimulationMode mode)
+{
+    init_sri(&system->sri1_backup, mode);
+    init_sri(&system->sri2_active, mode);
+    system->obc_input = DATA_FLIGHT;
+    system->nozzle_command = NOZZLE_NEUTRAL;
+}
+
+/*
+ * Model the Ada conversion without executing an out-of-range C cast.
+ * Such a cast is undefined behavior in C and would not deterministically
+ * reproduce the SRI processor's Operand Error.
+ */
+static ConversionResult model_bias_conversion(double value,
+                                               SimulationMode mode,
+                                               int alignment_active,
+                                               int16_t *result)
+{
+    if (!alignment_active) {
+        return CONVERSION_NOT_RUN;
     }
 
     if (value < (double)INT16_MIN || value > (double)INT16_MAX) {
-        return 0;
+        return mode == MODE_UNSAFE
+                   ? CONVERSION_OPERAND_ERROR
+                   : CONVERSION_BLOCKED;
+    }
+
+    if (result == NULL) {
+        return CONVERSION_BLOCKED;
     }
 
     *result = (int16_t)value;
-    return 1;
+    return CONVERSION_OK;
 }
 
-/* 로켓 상태를 읽고 관성 기준 장치의 출력 데이터를 만든다. */
-static SensorData run_sri(const RocketState *rocket,
-                          SimulationMode mode,
-                          int sri_already_failed)
+static void stop_sri(SRIState *sri, double failure_time)
+{
+    sri->operational = 0;
+    sri->failure_time = failure_time;
+}
+
+/* Run the active SRI and model the preceding backup-SRI data cycle. */
+static SensorData run_sri(GuidanceSystem *system,
+                          const RocketState *rocket,
+                          SimulationMode mode)
 {
     SensorData sensor = {0};
 
+    sensor.conversion_result = CONVERSION_NOT_RUN;
+    sensor.output_kind = DATA_FLIGHT;
+    sensor.valid = 1;
+
+    if (!system->sri2_active.operational) {
+        sensor.output_kind = DATA_DIAGNOSTIC;
+        sensor.valid = 0;
+        return sensor;
+    }
+
+    if (!system->sri2_active.alignment_active) {
+        return sensor;
+    }
+
+    sensor.bias_calculated = 1;
     sensor.raw_bias = rocket->horizontal_velocity * BIAS_SCALE;
+    sensor.conversion_result = model_bias_conversion(
+        sensor.raw_bias,
+        mode,
+        system->sri2_active.alignment_active,
+        &sensor.converted_bias
+    );
 
-    if (sri_already_failed) {
-        sensor.sri_failed = 1;
-        sensor.reported_angle = mode == MODE_UNSAFE ? DIAGNOSTIC_ANGLE : 0.0;
-        sensor.valid = mode == MODE_UNSAFE ? 1 : 0;
+    if (sensor.conversion_result == CONVERSION_OK) {
         return sensor;
     }
 
-    sensor.conversion_ok = convert_bias(sensor.raw_bias, &sensor.converted_bias);
-
-    if (sensor.conversion_ok) {
-        sensor.reported_angle = rocket->angle;
-        sensor.valid = 1;
-        sensor.sri_failed = 0;
-        return sensor;
-    }
-
-    sensor.sri_failed = 1;
-
-    if (mode == MODE_UNSAFE) {
-        /* 진단 비트가 정상 자세 데이터로 오해된 상황을 단순화한 값이다. */
-        sensor.reported_angle = DIAGNOSTIC_ANGLE;
-        sensor.valid = 1;
+    if (sensor.conversion_result == CONVERSION_OPERAND_ERROR) {
+        stop_sri(&system->sri1_backup, BACKUP_SRI_FAILURE_TIME);
+        stop_sri(&system->sri2_active, ACTIVE_SRI_FAILURE_TIME);
+        sensor.output_kind = DATA_DIAGNOSTIC;
+        sensor.valid = 0;
     } else {
-        sensor.reported_angle = 0.0;
+        sensor.output_kind = DATA_INVALID;
         sensor.valid = 0;
     }
 
     return sensor;
 }
 
-/* SAFE 모드는 유효하지 않은 새 값 대신 마지막 정상값을 사용한다. */
-static double run_navigation(SensorData sensor,
-                             double last_valid_angle,
-                             SimulationMode mode)
+static void run_obc(GuidanceSystem *system,
+                    const SensorData *sensor,
+                    SimulationMode mode)
 {
-    if (mode == MODE_SAFE && sensor.valid == 0) {
-        return last_valid_angle;
+    if (sensor->valid && sensor->output_kind == DATA_FLIGHT) {
+        system->obc_input = DATA_FLIGHT;
+        system->nozzle_command = NOZZLE_NEUTRAL;
+        return;
     }
 
-    return sensor.reported_angle;
-}
-
-/* 목표 자세와 측정 자세의 차이로 제어 명령을 계산한다. */
-static double run_control(double navigation_angle,
-                          double previous_control,
-                          SimulationMode mode)
-{
-    double desired_control = TARGET_ANGLE - navigation_angle;
-
-    if (mode == MODE_SAFE) {
-        double change = desired_control - previous_control;
-
-        if (change > SAFE_CONTROL_CHANGE_LIMIT) {
-            change = SAFE_CONTROL_CHANGE_LIMIT;
-        } else if (change < -SAFE_CONTROL_CHANGE_LIMIT) {
-            change = -SAFE_CONTROL_CHANGE_LIMIT;
-        }
-
-        return previous_control + change;
+    if (mode == MODE_UNSAFE && sensor->output_kind == DATA_DIAGNOSTIC) {
+        /* Flight 501 interpreted the active SRI diagnostic pattern as flight data. */
+        system->obc_input = DATA_DIAGNOSTIC;
+        system->nozzle_command = NOZZLE_FULL_DEFLECTION;
+        return;
     }
 
-    return desired_control;
+    system->obc_input = DATA_INVALID;
+    system->nozzle_command = NOZZLE_NEUTRAL;
 }
 
-/* 제어 결과를 자세에 적용하고 시스템 상태를 결정한다. */
-static void apply_control(RocketState *rocket,
-                          SensorData sensor,
-                          double control_command,
-                          SimulationMode mode)
+static void apply_guidance(RocketState *rocket,
+                           const GuidanceSystem *system)
 {
     if (rocket->status == STATUS_FAILED) {
         return;
     }
 
-    rocket->angle += control_command;
-
-    if (rocket->angle > ANGLE_LIMIT ||
-        rocket->angle < -ANGLE_LIMIT) {
-        rocket->status = STATUS_FAILED;
-        return;
+    if (system->nozzle_command == NOZZLE_FULL_DEFLECTION &&
+        rocket->status == STATUS_NORMAL) {
+        rocket->status = STATUS_CONTROL_LOST;
     }
 
-    if (mode == MODE_SAFE && sensor.sri_failed) {
-        rocket->status = STATUS_SAFE_MODE;
+    if (rocket->status == STATUS_CONTROL_LOST &&
+        rocket->time >= BREAKUP_TIME &&
+        fabs(rocket->angle) > ANGLE_OF_ATTACK_LIMIT) {
+        rocket->status = STATUS_FAILED;
     }
 }
 
-/* 다음 1초의 속도와 위치를 단순 산술로 갱신한다. */
 static void update_rocket(RocketState *rocket)
 {
-    if (rocket->status == STATUS_FAILED && rocket->altitude <= 0.0) {
-        rocket->horizontal_velocity = 0.0;
-        rocket->vertical_velocity = 0.0;
+    if (rocket->status == STATUS_FAILED) {
+        /* The real launcher broke up and self-destructed; do not model a fall. */
         rocket->time += DT;
         return;
     }
 
-    if (rocket->status == STATUS_FAILED) {
-        rocket->horizontal_velocity += FAILED_HORIZONTAL_ACCELERATION * DT;
-        rocket->vertical_velocity += FAILED_VERTICAL_ACCELERATION * DT;
-    } else {
-        rocket->horizontal_velocity += HORIZONTAL_ACCELERATION * DT;
-        rocket->vertical_velocity += VERTICAL_ACCELERATION * DT;
-    }
-
+    rocket->horizontal_velocity += HORIZONTAL_ACCELERATION * DT;
+    rocket->vertical_velocity += VERTICAL_ACCELERATION * DT;
     rocket->x += rocket->horizontal_velocity * DT;
     rocket->altitude += rocket->vertical_velocity * DT;
 
-    if (rocket->altitude < 0.0) {
-        rocket->altitude = 0.0;
-        rocket->horizontal_velocity = 0.0;
-        rocket->vertical_velocity = 0.0;
+    if (rocket->status == STATUS_CONTROL_LOST) {
+        rocket->angle += ABNORMAL_TURN_RATE * DT;
     }
 
     rocket->time += DT;
 }
 
-/* CSV 머리글을 고정된 인터페이스 순서로 기록한다. */
 static void write_csv_header(FILE *file)
 {
     fprintf(file,
             "mode,time,x,altitude,h_velocity,v_velocity,angle,raw_bias,"
-            "converted_bias,reported_angle,sensor_valid,sri_failed,control,status\n");
+            "converted_bias,conversion_result,sri1_status,sri2_status,"
+            "sri1_failure_time,sri2_failure_time,obc_input,nozzle_command,status\n");
 }
 
-/* 현재 시뮬레이션 상태 한 행을 CSV에 기록한다. */
+static void write_optional_time(FILE *file, const SRIState *sri)
+{
+    if (sri->failure_time >= 0.0) {
+        fprintf(file, "%.3f", sri->failure_time);
+    }
+}
+
 static void write_csv_row(FILE *file,
                           SimulationMode mode,
                           const RocketState *rocket,
-                          SensorData sensor,
-                          double control_command)
+                          const GuidanceSystem *system,
+                          const SensorData *sensor)
 {
     fprintf(file,
-            "%s,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,",
+            "%s,%.0f,%.2f,%.2f,%.2f,%.2f,%.2f,",
             mode_name(mode),
             rocket->time,
             rocket->x,
             rocket->altitude,
             rocket->horizontal_velocity,
             rocket->vertical_velocity,
-            rocket->angle,
-            sensor.raw_bias);
+            rocket->angle);
 
-    if (sensor.conversion_ok) {
-        fprintf(file, "%d", (int)sensor.converted_bias);
+    if (sensor->bias_calculated) {
+        fprintf(file, "%.2f", sensor->raw_bias);
+    }
+
+    fputc(',', file);
+    if (sensor->conversion_result == CONVERSION_OK) {
+        fprintf(file, "%d", (int)sensor->converted_bias);
     }
 
     fprintf(file,
-            ",%.2f,%d,%d,%.2f,%s\n",
-            sensor.reported_angle,
-            sensor.valid,
-            sensor.sri_failed,
-            control_command,
+            ",%s,%s,%s,",
+            conversion_name(sensor->conversion_result),
+            sri_status_name(&system->sri1_backup),
+            sri_status_name(&system->sri2_active));
+
+    write_optional_time(file, &system->sri1_backup);
+    fputc(',', file);
+    write_optional_time(file, &system->sri2_active);
+
+    fprintf(file,
+            ",%s,%s,%s\n",
+            data_kind_name(system->obc_input),
+            nozzle_name(system->nozzle_command),
             status_name(rocket->status));
 }
 
-/* 매초 핵심 상태를 한 줄로 출력한다. */
 static void print_step_log(SimulationMode mode,
                            const RocketState *rocket,
-                           SensorData sensor,
-                           double control_command)
+                           const GuidanceSystem *system,
+                           const SensorData *sensor)
 {
-    printf("[%s] T+%02.0f | alt=%8.2f | bias=%8.0f | valid=%d | "
-           "control=%6.1f | %s\n",
+    printf("[%s] T+%02.0f | alt=%8.2f | SRI1=%-7s | SRI2=%-7s | "
+           "OBC=%-10s | nozzle=%-15s | %s\n",
            mode_name(mode),
            rocket->time,
            rocket->altitude,
-           sensor.raw_bias,
-           sensor.valid,
-           control_command,
+           sri_status_name(&system->sri1_backup),
+           sri_status_name(&system->sri2_active),
+           data_kind_name(system->obc_input),
+           nozzle_name(system->nozzle_command),
            status_name(rocket->status));
-}
 
-/* 최초 오류 순간에 모듈 사이의 실패 전파 순서를 보여준다. */
-static void print_failure_chain(SimulationMode mode,
-                                const RocketState *rocket,
-                                double navigation_angle,
-                                double control_command)
-{
-    printf("  -> RANGE ERROR: %.0f is outside int16_t\n",
-           rocket->horizontal_velocity * BIAS_SCALE);
+    if (sensor->conversion_result == CONVERSION_OPERAND_ERROR) {
+        printf("  -> %.3f: backup SRI 1 stopped (previous 72 ms cycle)\n",
+               system->sri1_backup.failure_time);
+        printf("  -> %.3f: active SRI 2 Operand Error, BH=%.0f\n",
+               system->sri2_active.failure_time,
+               sensor->raw_bias);
+        printf("  -> OBC: backup unavailable; diagnostic pattern accepted\n");
+        printf("  -> CONTROL: full nozzle deflection commanded\n");
+    }
 
-    if (mode == MODE_UNSAFE) {
-        printf("  -> SRI FAILED: diagnostic data marked as valid\n");
-        printf("  -> NAVIGATION: diagnostic angle %.1f accepted\n",
-               navigation_angle);
-        printf("  -> CONTROL: abnormal command %.1f applied\n",
-               control_command);
-    } else {
-        printf("  -> SRI INVALID: unsafe conversion blocked\n");
-        printf("  -> NAVIGATION: last valid angle %.1f kept\n",
-               navigation_angle);
-        printf("  -> CONTROL: safe command %.1f applied\n",
-               control_command);
+    if (rocket->status == STATUS_FAILED && rocket->time == BREAKUP_TIME) {
+        printf("  -> BREAKUP: angle of attack exceeded %.0f degrees\n",
+               ANGLE_OF_ATTACK_LIMIT);
+        printf("  -> NEUTRALISATION: self-destruct triggered\n");
     }
 }
 
-/* 한 모드의 0초부터 60초까지를 실행하고 CSV를 생성한다. */
 static int run_simulation(SimulationMode mode, const char *file_name)
 {
     FILE *file = fopen(file_name, "w");
     RocketState rocket;
-    double last_valid_angle = 0.0;
-    double previous_control = 0.0;
-    int failure_reported = 0;
-    int sri_failed_latched = 0;
+    GuidanceSystem system;
     int step;
 
     if (file == NULL) {
@@ -315,36 +411,18 @@ static int run_simulation(SimulationMode mode, const char *file_name)
         return 0;
     }
 
-    init_state(&rocket);
+    init_rocket(&rocket);
+    init_guidance(&system, mode);
     write_csv_header(file);
     printf("\n=== %s MODE ===\n", mode_name(mode));
 
     for (step = 0; step <= TOTAL_TIME; ++step) {
-        SensorData sensor = run_sri(&rocket, mode, sri_failed_latched);
-        double navigation_angle;
-        double control_command;
+        SensorData sensor = run_sri(&system, &rocket, mode);
 
-        if (sensor.sri_failed) {
-            sri_failed_latched = 1;
-        }
-
-        if (sensor.conversion_ok) {
-            last_valid_angle = sensor.reported_angle;
-        }
-
-        navigation_angle = run_navigation(sensor, last_valid_angle, mode);
-        control_command = run_control(navigation_angle, previous_control, mode);
-        apply_control(&rocket, sensor, control_command, mode);
-
-        print_step_log(mode, &rocket, sensor, control_command);
-
-        if (sensor.sri_failed && failure_reported == 0) {
-            print_failure_chain(mode, &rocket, navigation_angle, control_command);
-            failure_reported = 1;
-        }
-
-        write_csv_row(file, mode, &rocket, sensor, control_command);
-        previous_control = control_command;
+        run_obc(&system, &sensor, mode);
+        apply_guidance(&rocket, &system);
+        print_step_log(mode, &rocket, &system, &sensor);
+        write_csv_row(file, mode, &rocket, &system, &sensor);
 
         if (step < TOTAL_TIME) {
             update_rocket(&rocket);
@@ -355,39 +433,62 @@ static int run_simulation(SimulationMode mode, const char *file_name)
     return 1;
 }
 
-/* 형변환 경계값과 실패 시 출력값 보존을 확인한다. */
 static int run_conversion_tests(void)
 {
     int passed = 0;
     int16_t result;
 
     result = 0;
-    if (convert_bias(32767.0, &result) && result == INT16_MAX) {
+    if (model_bias_conversion(32767.0, MODE_UNSAFE, 1, &result) ==
+            CONVERSION_OK &&
+        result == INT16_MAX) {
         ++passed;
     }
 
     result = 1234;
-    if (!convert_bias(32768.0, &result) && result == 1234) {
+    if (model_bias_conversion(32768.0, MODE_UNSAFE, 1, &result) ==
+            CONVERSION_OPERAND_ERROR &&
+        result == 1234) {
         ++passed;
     }
 
     result = 0;
-    if (convert_bias(-32768.0, &result) && result == INT16_MIN) {
+    if (model_bias_conversion(-32768.0, MODE_UNSAFE, 1, &result) ==
+            CONVERSION_OK &&
+        result == INT16_MIN) {
         ++passed;
     }
 
     result = 1234;
-    if (!convert_bias(-32769.0, &result) && result == 1234) {
+    if (model_bias_conversion(-32769.0, MODE_UNSAFE, 1, &result) ==
+            CONVERSION_OPERAND_ERROR &&
+        result == 1234) {
         ++passed;
     }
 
     result = 1234;
-    if (!convert_bias(0.0, NULL) && result == 1234) {
+    if (model_bias_conversion(32768.0, MODE_SAFE, 1, &result) ==
+            CONVERSION_BLOCKED &&
+        result == 1234) {
         ++passed;
     }
 
-    printf("Conversion tests: %d/5 passed\n", passed);
-    return passed == 5;
+    result = 1234;
+    if (model_bias_conversion(0.0, MODE_SAFE, 0, &result) ==
+            CONVERSION_NOT_RUN &&
+        result == 1234) {
+        ++passed;
+    }
+
+    result = 1234;
+    if (model_bias_conversion(0.0, MODE_SAFE, 1, NULL) ==
+            CONVERSION_BLOCKED &&
+        result == 1234) {
+        ++passed;
+    }
+
+    printf("Conversion tests: %d/7 passed\n", passed);
+    return passed == 7;
 }
 
 int main(int argc, char *argv[])

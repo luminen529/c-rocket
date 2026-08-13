@@ -1,7 +1,7 @@
 "use strict";
 
 const SIMULATION_SECONDS_PER_REAL_SECOND = 2;
-const FAILURE_TIME = 35;
+const FAILURE_TIME = 39;
 const EXPLOSION_DURATION = 1.4;
 
 const state = {
@@ -93,13 +93,14 @@ function interpolateRow(rows, time) {
         x: lower.x + (upper.x - lower.x) * progress,
         altitude: lower.altitude + (upper.altitude - lower.altitude) * progress,
         angle: lower.angle + (upper.angle - lower.angle) * progress,
-        status: progress === 0 ? lower.status : upper.status
+        // Status changes are discrete events; do not reveal the next event early.
+        status: lower.status
     };
 }
 
 function setStatus(element, status) {
     element.textContent = status;
-    element.classList.toggle("safe-mode", status === "SAFE_MODE");
+    element.classList.toggle("control-lost", status === "CONTROL_LOST");
     element.classList.toggle("failed", status === "FAILED");
 }
 

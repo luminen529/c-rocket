@@ -4,10 +4,10 @@
 
 동일한 입력을 두 모드로 실행합니다.
 
-- `UNSAFE`: 형변환 실패 뒤 진단값이 정상 자세 데이터처럼 전달되어 비정상 제어와 비행 실패로 이어집니다.
-- `SAFE`: 범위를 벗어난 값을 차단하고 마지막 정상 자세값을 유지하여 비행을 계속합니다.
+- `UNSAFE`: 두 관성 기준 장치(SRI)가 같은 형변환 오류로 차례로 정지하고, 진단 데이터가 비행 데이터로 해석되어 제어 상실과 기체 파괴로 이어집니다.
+- `SAFE`: 이륙 후 불필요한 정렬 작업을 중단하고 형변환과 입력 데이터도 검증하여 정상 비행을 계속합니다.
 
-이 프로젝트는 실제 로켓의 물리 모델이나 아리안 5 소프트웨어를 복제하지 않습니다. 작은 자료형 오류가 센서, 항법, 제어 단계로 어떻게 전파될 수 있는지 비교하는 것이 목적입니다.
+이 프로젝트는 실제 로켓의 물리 모델이나 아리안 5 소프트웨어를 복제하지 않습니다. 대신 조사보고서에 기록된 핵심 사건의 순서와 작은 자료형 오류가 센서, 항법, 제어 단계로 전파되는 과정을 비교합니다.
 
 ## 실행 화면
 
@@ -18,7 +18,7 @@ output/unsafe.csv
 output/safe.csv
 ```
 
-웹 화면은 두 CSV를 읽어 UNSAFE와 SAFE 궤적을 좌우 SVG에서 같은 시간축으로 부드럽게 재생합니다. UNSAFE가 실패하는 T+35에는 폭발과 잔해 효과가 나타납니다. 재생, 일시정지, 처음으로 이동, 시간 슬라이더를 지원합니다.
+웹 화면은 두 CSV를 읽어 UNSAFE와 SAFE 궤적을 좌우 SVG에서 같은 시간축으로 부드럽게 재생합니다. UNSAFE는 T+37에 `CONTROL_LOST`가 되고 T+39에 폭발과 잔해 효과가 나타납니다. 재생, 일시정지, 처음으로 이동, 시간 슬라이더를 지원합니다.
 
 ## 빠른 실행
 
@@ -56,29 +56,31 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 
 ## C 코드의 핵심
 
-형변환 함수는 값이 `int16_t` 범위 안에 있을 때만 캐스팅합니다.
+실제 SRI의 Ada 코드는 보호되지 않은 변환에서 `Operand Error`를 발생시켰습니다. C에서 범위를 벗어난 실수를 작은 정수형으로 직접 변환하면 정의되지 않은 동작이 되므로, 이 프로그램은 오류 결과를 명시적으로 모델링합니다.
 
 ```c
 if (value < (double)INT16_MIN || value > (double)INT16_MAX) {
-    return 0;
+    return mode == MODE_UNSAFE
+               ? CONVERSION_OPERAND_ERROR
+               : CONVERSION_BLOCKED;
 }
 
 *result = (int16_t)value;
 ```
 
-범위를 벗어난 `double`을 직접 작은 정수형으로 변환한 결과에는 의존하지 않습니다. 대신 변환 함수의 실패 반환값을 이용해 SRI 고장 조건을 항상 같은 방식으로 재현합니다.
+따라서 실제 정의되지 않은 동작에 의존하지 않으면서도 UNSAFE의 프로세서 정지와 SAFE의 방어 동작을 항상 같은 방식으로 확인할 수 있습니다.
 
 시뮬레이션에서는 다음 교육용 상수를 사용합니다.
 
 ```text
-horizontal_velocity(T+34) = 1020
-horizontal_bias(T+34)     = 32640  → 변환 성공
+horizontal_velocity(T+36) = 1080
+horizontal_bias(T+36)     = 32400  → 변환 성공
 
-horizontal_velocity(T+35) = 1050
-horizontal_bias(T+35)     = 33600  → int16_t 범위 초과
+horizontal_velocity(T+37) = 1110
+horizontal_bias(T+37)     = 33300  → Operand Error
 ```
 
-이 수치와 단위는 실제 아리안 5의 비행 데이터를 뜻하지 않습니다. 오류 발생 시점을 명확하게 보여주기 위해 정한 학습용 값입니다.
+이 수치와 단위는 실제 아리안 5의 비행 데이터를 뜻하지 않습니다. 오류 발생 시점과 약 3.5km였던 당시 고도를 알아보기 쉽게 보여주기 위한 학습용 값입니다.
 
 ## 프로젝트 구조
 
@@ -88,20 +90,21 @@ c-rocket/
 ├─ web/             # HTML/CSS/JavaScript/SVG 시각화
 ├─ output/          # 실행으로 생성되는 CSV
 ├─ build/           # 실행으로 생성되는 프로그램
-├─ run.ps1          # 컴파일, 검증, 웹 서버 실행
-└─ PROJECT_PLAN.md  # 조사 및 구현 설계
+└─ run.ps1          # 컴파일, 검증, 웹 서버 실행
 ```
 
 ## 아리안 5 Flight 501과의 관계
 
 1996년 6월 4일 아리안 5의 첫 시험 비행은 약 37초 뒤 유도 및 자세 정보를 잃었습니다. 아리안 4에서 재사용한 관성 기준 장치의 정렬 기능이 아리안 5에서는 이륙 후 필요하지 않았지만 계속 실행되었고, 수평 방향과 관련된 내부값을 64비트 부동소수점에서 16비트 부호 있는 정수로 변환하는 과정에서 표현 범위를 넘었습니다.
 
-주 장치와 대기 장치는 동일한 설계를 사용해 같은 원인으로 모두 정지했습니다. 이후 진단 비트 패턴 일부가 비행 데이터로 해석되면서 큰 자세 수정 명령이 발생했습니다.
+백업 SRI 1은 활성 SRI 2보다 한 데이터 주기인 72ms 먼저 같은 원인으로 정지했습니다. 따라서 활성 장치가 정지했을 때 백업 전환이 불가능했고, SRI 2의 진단 비트 패턴 일부가 비행 데이터로 해석되어 노즐이 끝까지 편향되었습니다. 약 T+39에는 20도를 넘은 받음각으로 기체가 파괴되고 자동폭파 장치가 작동했습니다.
 
 실제 관성 기준 장치의 소프트웨어는 C가 아니라 Ada로 작성되었습니다. 이 프로젝트는 해당 사고의 복제본이 아니라, C도 임베디드 시스템에서 널리 사용된다는 점에 착안해 비슷한 형변환 실패와 안전 처리의 차이를 C로 표현한 것입니다.
 
 참고 자료:
 
+- [How Not To Code — A space error: $370 million for an integer overflow](https://hownot2code.wordpress.com/2016/09/02/a-space-error-370-million-for-an-integer-overflow/)
+- [YouTube — Ariane 5 Flight 501, 4 June 1996](https://www.youtube.com/watch?v=N6PWATvLQCY)
 - [ESA — Flight 501 failure: first information](https://sci.esa.int/web/cluster/-/36899-pr-20-1996-flight-501-failure-first-information)
 - [ESA — Learning from Flight 501 and Preparing for 502](https://www.esa.int/esapub/bulletin/bullet89/dalma89.htm)
 - [ESA — The Inquiry Board's Recommendations](https://www.esa.int/esapub/bulletin/bullet89/recom89.htm)
@@ -109,8 +112,8 @@ c-rocket/
 
 ## 결과 해석
 
-- T+34까지 두 모드의 궤적과 자세는 같습니다.
-- T+35에 `horizontal_bias`가 16비트 정수 범위를 넘습니다.
-- UNSAFE는 진단 자세값 `-70도`를 정상값처럼 사용해 `+70도` 제어 명령을 만들고 실패합니다.
-- SAFE는 센서 데이터를 무효 처리하고 마지막 정상 자세인 `0도`를 유지합니다.
-- UNSAFE는 약 T+50에 고도 0에 도달하고, SAFE는 T+60까지 비행을 계속합니다.
+- T+36까지 두 모드의 궤적과 자세는 같습니다.
+- UNSAFE에서는 T+36.928에 백업 SRI 1, T+37.000에 활성 SRI 2가 정지합니다.
+- T+37에 OBC가 진단 데이터를 받아 노즐 완전 편향을 명령하고 `CONTROL_LOST`가 됩니다.
+- T+39에 받음각이 20도를 넘어 기체가 파괴되며, 실제 사고처럼 지상 추락은 따로 계산하지 않습니다.
+- SAFE는 정렬 변환을 실행하지 않으며 두 SRI와 정상 비행 데이터를 T+60까지 유지합니다.

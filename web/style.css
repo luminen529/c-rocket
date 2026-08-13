@@ -6,6 +6,7 @@
     --text: #eef4ff;
     --muted: #9cacbf;
     --unsafe: #ff6b6b;
+    --warning: #ffb84d;
     --safe: #52d6a4;
     --normal: #82a8d8;
     --window: #8fd7ff;
@@ -102,8 +103,8 @@ h2 {
     letter-spacing: 0.08em;
 }
 
-.status.safe-mode {
-    color: var(--safe);
+.status.control-lost {
+    color: var(--warning);
 }
 
 .status.failed {

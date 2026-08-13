@@ -79,55 +79,73 @@ $safe = Import-Csv (Join-Path $outputDir "safe.csv")
 Assert-Check ($unsafe.Count -eq 61) "UNSAFE must contain 61 data rows."
 Assert-Check ($safe.Count -eq 61) "SAFE must contain 61 data rows."
 
-$unsafe34 = $unsafe | Where-Object { $_.time -eq "34" }
-$safe34 = $safe | Where-Object { $_.time -eq "34" }
-$unsafe35 = $unsafe | Where-Object { $_.time -eq "35" }
-$safe35 = $safe | Where-Object { $_.time -eq "35" }
-$unsafe50 = $unsafe | Where-Object { $_.time -eq "50" }
+$unsafe36 = $unsafe | Where-Object { $_.time -eq "36" }
+$unsafe37 = $unsafe | Where-Object { $_.time -eq "37" }
+$unsafe38 = $unsafe | Where-Object { $_.time -eq "38" }
+$unsafe39 = $unsafe | Where-Object { $_.time -eq "39" }
+$unsafe40 = $unsafe | Where-Object { $_.time -eq "40" }
+$safe37 = $safe | Where-Object { $_.time -eq "37" }
 $safe60 = $safe | Where-Object { $_.time -eq "60" }
 
-for ($index = 0; $index -le 34; $index++) {
+for ($index = 0; $index -le 36; $index++) {
     Assert-Check (
         $unsafe[$index].x -eq $safe[$index].x -and
         $unsafe[$index].altitude -eq $safe[$index].altitude -and
         $unsafe[$index].angle -eq $safe[$index].angle
-    ) "Both modes must match through T+34."
+    ) "Both modes must match through T+36."
 }
 
 Assert-Check (
-    $unsafe34.raw_bias -eq "32640.00" -and
-    $unsafe34.converted_bias -eq "32640"
-) "T+34 must remain inside the int16_t range."
+    $unsafe36.raw_bias -eq "32400.00" -and
+    $unsafe36.converted_bias -eq "32400" -and
+    $unsafe36.conversion_result -eq "OK" -and
+    $unsafe36.sri1_status -eq "RUNNING" -and
+    $unsafe36.sri2_status -eq "RUNNING"
+) "T+36 must remain inside the int16_t range with both SRIs running."
 
 Assert-Check (
-    $unsafe35.status -eq "FAILED" -and
-    $unsafe35.sensor_valid -eq "1" -and
-    $unsafe35.sri_failed -eq "1" -and
-    $unsafe35.raw_bias -eq "33600.00" -and
-    $unsafe35.converted_bias -eq "" -and
-    $unsafe35.control -eq "70.00"
-) "The UNSAFE failure at T+35 is not correct."
+    $unsafe37.status -eq "CONTROL_LOST" -and
+    $unsafe37.raw_bias -eq "33300.00" -and
+    $unsafe37.converted_bias -eq "" -and
+    $unsafe37.conversion_result -eq "OPERAND_ERROR" -and
+    $unsafe37.sri1_status -eq "STOPPED" -and
+    $unsafe37.sri2_status -eq "STOPPED" -and
+    $unsafe37.sri1_failure_time -eq "36.928" -and
+    $unsafe37.sri2_failure_time -eq "37.000" -and
+    $unsafe37.obc_input -eq "DIAGNOSTIC" -and
+    $unsafe37.nozzle_command -eq "FULL_DEFLECTION"
+) "The two-SRI UNSAFE failure sequence at T+37 is not correct."
 
 Assert-Check (
-    $safe35.status -eq "SAFE_MODE" -and
-    $safe35.sensor_valid -eq "0" -and
-    $safe35.sri_failed -eq "1" -and
-    $safe35.raw_bias -eq "33600.00" -and
-    $safe35.converted_bias -eq "" -and
-    $safe35.control -eq "0.00"
-) "The SAFE fallback at T+35 is not correct."
+    $unsafe38.status -eq "CONTROL_LOST" -and
+    $unsafe38.angle -eq "12.00" -and
+    $unsafe39.status -eq "FAILED" -and
+    $unsafe39.angle -eq "24.00" -and
+    [double]::Parse(
+        $unsafe39.altitude,
+        [System.Globalization.CultureInfo]::InvariantCulture
+    ) -gt 0.0
+) "UNSAFE must lose control before breaking up at T+39."
 
 Assert-Check (
-    $unsafe50.altitude -eq "0.00" -and
-    $unsafe50.status -eq "FAILED"
-) "UNSAFE must reach the ground at T+50."
+    $unsafe40.x -eq $unsafe39.x -and
+    $unsafe40.altitude -eq $unsafe39.altitude -and
+    $unsafe40.angle -eq $unsafe39.angle -and
+    $unsafe40.status -eq "FAILED"
+) "UNSAFE must remain at the breakup position instead of falling to ground."
+
 Assert-Check (
+    ($safe | Where-Object { $_.conversion_result -ne "NOT_RUN" }).Count -eq 0 -and
+    ($safe | Where-Object { $_.sri1_status -ne "RUNNING" }).Count -eq 0 -and
+    ($safe | Where-Object { $_.sri2_status -ne "RUNNING" }).Count -eq 0 -and
+    ($safe | Where-Object { $_.status -ne "NORMAL" }).Count -eq 0 -and
+    $safe37.obc_input -eq "FLIGHT" -and
+    $safe37.nozzle_command -eq "NEUTRAL" -and
     [double]::Parse(
         $safe60.altitude,
         [System.Globalization.CultureInfo]::InvariantCulture
-    ) -gt 0.0 -and
-    $safe60.status -eq "SAFE_MODE"
-) "SAFE must keep a positive altitude at T+60."
+    ) -gt 0.0
+) "SAFE must keep alignment off and remain healthy through T+60."
 
 Write-Host "All CSV checks passed."
 
