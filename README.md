@@ -11,7 +11,7 @@
 
 ## 실행 화면
 
-C 프로그램은 T+0부터 T+60까지 콘솔 로그를 출력하고, 다음 CSV를 생성합니다.
+C 프로그램(`main.c` 또는 CMake로 생성한 `c-rocket.exe`)은 웹 서버 없이도 T+0부터 T+60까지 콘솔 로그를 출력하고, 실행 위치의 `output/` 디렉터리를 자동으로 만든 뒤 다음 CSV를 생성합니다.
 
 ```text
 output/unsafe.csv
@@ -20,13 +20,18 @@ output/safe.csv
 
 웹 화면은 두 CSV를 읽어 UNSAFE와 SAFE 궤적을 좌우 SVG에서 같은 시간축으로 부드럽게 재생합니다. UNSAFE는 T+37에 `CONTROL_LOST`가 되고 T+39에 폭발과 잔해 효과가 나타납니다. 재생, 일시정지, 처음으로 이동, 시간 슬라이더를 지원합니다.
 
+두 실행 경로는 분리되어 있습니다.
+
+- C 프로그램 단독 실행: 콘솔 로그와 CSV 생성만 수행하며 웹 서버나 Python에 의존하지 않습니다.
+- `run.ps1` 실행: CMake configure/build, 시뮬레이션, CSV 검증을 수행한 뒤 웹 시각화 서버를 실행합니다.
+
 ## 빠른 실행
 
 필요한 프로그램은 다음과 같습니다.
 
 - Windows PowerShell
-- MinGW GCC
-- Python 3
+- CMake 3.10 이상 및 CMake가 사용할 C 컴파일러(예: MinGW GCC)
+- Python 3 (`run.ps1`에서 웹 시각화를 실행할 때만 필요)
 
 프로젝트 폴더에서 실행합니다.
 
@@ -36,11 +41,20 @@ output/safe.csv
 
 스크립트는 다음 작업을 자동으로 수행합니다.
 
-1. GCC C11 컴파일
-2. 16비트 형변환 경계값 테스트
-3. UNSAFE와 SAFE 시뮬레이션 및 CSV 생성
-4. CSV 시나리오 검증
-5. `http://localhost:8000/web/` 실행
+1. CMake configure
+2. CMake를 통한 C 프로그램 빌드
+3. UNSAFE/SAFE 시뮬레이션 및 CSV 생성과 시나리오 검증
+4. `http://localhost:8000/web/` 실행
+
+웹 사이트 없이 C 프로그램만 실행하려면 다음처럼 CMake로 빌드한 실행 파일을 실행합니다. 아래 경로는 Ninja/MinGW 단일 구성 빌드 기준입니다.
+
+```powershell
+cmake -S . -B build
+cmake --build build --config Release
+.\build\c-rocket.exe
+```
+
+이 실행은 콘솔 로그와 `output/unsafe.csv`, `output/safe.csv` 생성까지만 수행합니다.
 
 PowerShell 실행 정책으로 스크립트가 차단되면 현재 실행에만 정책을 우회할 수 있습니다.
 
@@ -86,7 +100,8 @@ horizontal_bias(T+37)     = 33300  → Operand Error
 
 ```text
 c-rocket/
-├─ src/main.c       # C 시뮬레이션, 콘솔 로그, CSV 출력, 경계값 테스트
+├─ CMakeLists.txt    # CMake 빌드 정의
+├─ src/main.c       # C 시뮬레이션, 콘솔 로그, CSV 출력
 ├─ web/             # HTML/CSS/JavaScript/SVG 시각화
 ├─ output/          # 실행으로 생성되는 CSV
 ├─ build/           # 실행으로 생성되는 프로그램

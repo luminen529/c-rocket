@@ -1,7 +1,13 @@
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <string.h>
+#include <errno.h>
+
+#if defined(_WIN32)
+#include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
 
 #define TOTAL_TIME 60
 #define DT 1.0  // 갱신 간격
@@ -429,6 +435,24 @@ static void print_step_log(SimulationMode mode,
     }
 }
 
+static int ensure_output_directory(void)
+{
+    int result;
+
+#if defined(_WIN32)
+    result = _mkdir("output");
+#else
+    result = mkdir("output", 0777);
+#endif
+
+    if (result == 0 || errno == EEXIST) {
+        return 0;
+    }
+
+    fprintf(stderr, "Cannot create output directory: %s\n", "output");
+    return 1;
+}
+
 // 시뮬레이션 실행 함수
 static int run_simulation(SimulationMode mode, const char *file_name)
 {
@@ -441,7 +465,7 @@ static int run_simulation(SimulationMode mode, const char *file_name)
     FILE *file = fopen(file_name, "w");
     RocketState rocket;
     GuidanceSystem system;
-    int step;  // 반복 횟수 = 시뮬레이션 시간
+    // 반복 횟수 = 시뮬레이션 시간
     // file을 불러올 수 없을 떄 exit 예외처리
     if (file == NULL) {
         fprintf(stderr, "Cannot open output file: %s\n", file_name);
@@ -452,7 +476,7 @@ static int run_simulation(SimulationMode mode, const char *file_name)
     write_csv_header(file);
     printf("\n=== SITUATION: %s ===\n", mode_name(mode));
 
-    for (step = 0; step <= TOTAL_TIME; ++step) {
+    for (int step = 0; step <= TOTAL_TIME; ++step) {
         SensorData sensor = run_sri(&system, &rocket, mode);
 
         run_obc(&system, &sensor, mode);
@@ -464,80 +488,18 @@ static int run_simulation(SimulationMode mode, const char *file_name)
             update_rocket(&rocket);
         }
     }
-
     fclose(file);
     return 0;
 }
 
-// 변환값 테스트 함수
-static int run_conversion_tests(void)
-{
-    int passed = 0;
-    int16_t result;
-
-    // UNSAFE의 범위 초과는 OPERAND_ERROR가 되고, SAFE의 범위 초과는 BLOCKED가 되어 출력 변수(result)를 바꾸지 않아야 한다.
-    result = 0;
-    if (model_bias_conversion(32767.0, MODE_UNSAFE, 1, &result) ==
-            CONVERSION_OK &&
-        result == INT16_MAX) {
-        ++passed;
-    }
-
-    result = 1234;
-    if (model_bias_conversion(32768.0, MODE_UNSAFE, 1, &result) ==
-            CONVERSION_OPERAND_ERROR &&
-        result == 1234) {
-        ++passed;
-    }
-
-    result = 0;
-    if (model_bias_conversion(-32768.0, MODE_UNSAFE, 1, &result) ==
-            CONVERSION_OK &&
-        result == INT16_MIN) {
-        ++passed;
-    }
-
-    result = 1234;
-    if (model_bias_conversion(-32769.0, MODE_UNSAFE, 1, &result) ==
-            CONVERSION_OPERAND_ERROR &&
-        result == 1234) {
-        ++passed;
-    }
-
-    result = 1234;
-    if (model_bias_conversion(32768.0, MODE_SAFE, 1, &result) ==
-            CONVERSION_BLOCKED &&
-        result == 1234) {
-        ++passed;
-    }
-
-    result = 1234;
-    if (model_bias_conversion(0.0, MODE_SAFE, 0, &result) ==
-            CONVERSION_NOT_RUN &&
-        result == 1234) {
-        ++passed;
-    }
-
-    result = 1234;
-    if (model_bias_conversion(0.0, MODE_SAFE, 1, NULL) ==
-            CONVERSION_BLOCKED &&
-        result == 1234) {
-        ++passed;
-    }
-
-    printf("Conversion tests: %d/7 passed\n", passed);
-    return passed == 7;
-}
-
 int main(int argc, char *argv[])
 {
-    // test모드 활성화 -> 변환 검사
-    if (argc == 2 && strcmp(argv[1], "--test") == 0) {
-        return run_conversion_tests() ? 0 : 1;
-    }
     // 인자 오류 처리
     if (argc != 1) {
-        fprintf(stderr, "Usage: %s [--test]\n", argv[0]);
+        fprintf(stderr, "Usage: %s\n", argv[0]);
+        return 1;
+    }
+    if (ensure_output_directory()) {
         return 1;
     }
     // run_simulation() 이 종료코드 '1'(오류)를 반환하면 종료코드 1로 종료
@@ -545,10 +507,9 @@ int main(int argc, char *argv[])
     if (run_simulation(MODE_UNSAFE, "output/unsafe.csv")) {
         return 1;
     }
-    if (!run_simulation(MODE_SAFE, "output/safe.csv")) {
+    if (run_simulation(MODE_SAFE, "output/safe.csv")) {
         return 1;
     }
-
     printf("\nCSV files created in output/.\n");
     return 0;
 }

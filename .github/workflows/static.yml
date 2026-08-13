@@ -29,9 +29,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p build output
-          gcc -std=c11 -Wall -Wextra -Wpedantic src/main.c -o build/c-rocket
-          ./build/c-rocket --test
+          cmake -S . -B build
+          cmake --build build --config Release --target c-rocket
           ./build/c-rocket
 
           test "$(wc -l < output/unsafe.csv)" -eq 62

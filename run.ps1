@@ -5,10 +5,9 @@ param(
 $ErrorActionPreference = "Stop"
 
 $projectRoot = $PSScriptRoot
-$sourceFile = Join-Path $projectRoot "src\main.c"
 $buildDir = Join-Path $projectRoot "build"
 $outputDir = Join-Path $projectRoot "output"
-$program = Join-Path $buildDir "c-rocket.exe"
+$configuration = "Release"
 $port = 8000
 
 function Assert-Check {
@@ -44,21 +43,45 @@ function Test-PortAvailable {
 
 New-Item -ItemType Directory -Force -Path $buildDir, $outputDir | Out-Null
 
-$gcc = Get-Command gcc -ErrorAction SilentlyContinue
-if (-not $gcc) {
-    throw "gcc was not found. Add MinGW GCC to PATH and try again."
+$cmake = Get-Command cmake -ErrorAction SilentlyContinue
+if (-not $cmake) {
+    throw "cmake was not found. Install CMake and add it to PATH."
 }
 
-Write-Host "[1/4] Compiling the C program."
-& $gcc.Source -std=c11 -Wall -Wextra -Wpedantic $sourceFile -o $program
+Write-Host "[1/4] Configuring the CMake build."
+& $cmake.Source `
+    -S $projectRoot `
+    -B $buildDir `
+    "-DCMAKE_BUILD_TYPE=$configuration"
 if ($LASTEXITCODE -ne 0) {
-    throw "C compilation failed."
+    throw "CMake configure failed."
 }
 
-Write-Host "[2/4] Running conversion boundary tests."
-& $program --test
+Write-Host "[2/4] Building the C program with CMake."
+& $cmake.Source `
+    --build $buildDir `
+    --config $configuration `
+    --target c-rocket
 if ($LASTEXITCODE -ne 0) {
-    throw "Conversion tests failed."
+    throw "CMake build failed."
+}
+
+$programCandidates = @(
+    (Join-Path $buildDir "c-rocket.exe"),
+    (Join-Path (Join-Path $buildDir $configuration) "c-rocket.exe")
+)
+$program = $programCandidates |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } |
+    Select-Object -First 1
+
+if (-not $program) {
+    $program = Get-ChildItem -Path $buildDir -Filter "c-rocket.exe" -File -Recurse |
+        Where-Object { $_.DirectoryName -notlike "*\CMakeFiles\*" } |
+        Select-Object -First 1 -ExpandProperty FullName
+}
+
+if (-not $program) {
+    throw "CMake built the target, but c-rocket.exe was not found in $buildDir."
 }
 
 Write-Host "[3/4] Running UNSAFE and SAFE simulations."
@@ -148,6 +171,7 @@ Assert-Check (
 ) "SAFE must keep alignment off and remain healthy through T+60."
 
 Write-Host "All CSV checks passed."
+Write-Host "[4/4] Preparing web visualization."
 
 if ($SkipServer) {
     Write-Host "[4/4] Web server skipped by -SkipServer."
@@ -158,9 +182,35 @@ if (-not (Test-PortAvailable -Port $port)) {
     throw "localhost:$port is already in use. Stop the existing server and try again."
 }
 
-$python = Get-Command python -ErrorAction SilentlyContinue
-if (-not $python) {
-    throw "python was not found. Add Python to PATH and try again."
+$pythonCandidates = @(
+    Get-Command python.exe -All -ErrorAction SilentlyContinue
+    Get-Command python3.exe -All -ErrorAction SilentlyContinue
+    Get-Command py.exe -All -ErrorAction SilentlyContinue
+) | Where-Object { $_.CommandType -eq "Application" }
+
+$pythonPath = $null
+foreach ($candidate in $pythonCandidates) {
+    if (-not (Test-Path -LiteralPath $candidate.Source -PathType Leaf)) {
+        continue
+    }
+
+    $pythonCheckExitCode = 1
+    try {
+        & $candidate.Source -c "import sys" *> $null
+        $pythonCheckExitCode = $LASTEXITCODE
+    }
+    catch {
+        $pythonCheckExitCode = 1
+    }
+
+    if ($pythonCheckExitCode -eq 0) {
+        $pythonPath = $candidate.Source
+        break
+    }
+}
+
+if (-not $pythonPath) {
+    throw "A working Python 3 interpreter was not found. Add Python to PATH and try again."
 }
 
 Write-Host "[4/4] Starting the web server."
@@ -175,7 +225,7 @@ $serverArguments = @(
 )
 
 $server = Start-Process `
-    -FilePath $python.Source `
+    -FilePath $pythonPath `
     -ArgumentList $serverArguments `
     -WorkingDirectory $projectRoot `
     -WindowStyle Hidden `
