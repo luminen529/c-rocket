@@ -466,7 +466,7 @@ static int run_simulation(SimulationMode mode, const char *file_name)
     RocketState rocket;
     GuidanceSystem system;
     // 반복 횟수 = 시뮬레이션 시간
-    // file을 불러올 수 없을 떄 exit 예외처리
+    // file을 불러올 수 없을 떄 예외처리
     if (file == NULL) {
         fprintf(stderr, "Cannot open output file: %s\n", file_name);
         return 1;
