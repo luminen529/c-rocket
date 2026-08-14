@@ -1,0 +1,40 @@
+@font-face {
+    font-family: 'SUITE';
+    font-weight: 400;
+    font-style: normal;
+    src: url('./fonts/SUITE-Regular.woff2') format('woff2');
+}
+
+body {
+    margin: 100px auto;
+    max-width: 600px;
+    background: #fff5f0;
+    font-family: SUITE;
+}
+
+h1 {
+    font-size: 3.5rem;
+    font-weight: 500;
+    line-height: 1.2;
+    text-align: center;
+}
+h2 {
+    font-size: 1.25rem;
+    line-height: 1.4;
+    font-weight: 800;
+}
+p {
+    font-size: 1rem;
+    line-height: 1.4;
+}
+.source {
+    font-size: 0.75rem;
+    line-height: 1;
+    color: #aaaaaa;
+    text-align: center;
+}
+img {
+    display: block;
+    max-width: 100%;
+    margin: 0 auto;
+}
