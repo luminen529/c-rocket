@@ -1,16 +1,10 @@
-@font-face {
-    font-family: 'SUITE';
-    font-weight: 400;
-    font-style: normal;
-    src: url('./fonts/SUITE-Regular.woff2') format('woff2');
-}
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
 
 :root {
-    color-scheme: dark;
-    --background: #08111f;
     --surface: #101c2f;
     --surface-border: #263752;
-    --text: #eef4ff;
+    --text: #000000;
+    --text-on-dark: #ffffff;
     --muted: #9cacbf;
     --unsafe: #ff6b6b;
     --warning: #ffb84d;
@@ -31,11 +25,9 @@
 body {
     min-width: 320px;
     margin: 0;
-    background:
-        radial-gradient(circle at 50% -20%, #173258 0, transparent 46%),
-        var(--background);
+    background: #ffffff;
     color: var(--text);
-    font-family: "SUITE", "Segoe UI", "Noto Sans KR", sans-serif;
+    font-family: "Pretendard", "Segoe UI", "Noto Sans KR", sans-serif;
 }
 
 button,
@@ -45,8 +37,7 @@ input {
 
 .simulator {
     width: min(1180px, calc(100% - 32px));
-    margin: 0 auto;
-    padding: 28px 0 36px;
+    margin: 32px auto;
 }
 
 .topbar,
@@ -60,6 +51,11 @@ input {
     justify-content: space-between;
     gap: 16px;
     margin-bottom: 18px;
+    color: var(--text);
+}
+
+#current-time {
+    font-variant-numeric: tabular-nums;
 }
 
 h1,
@@ -80,20 +76,15 @@ h2 {
     letter-spacing: 0.12em;
 }
 
-#current-time {
-    color: var(--muted);
-    font-variant-numeric: tabular-nums;
-}
-
 .flight-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px;
+    gap: 16px;
 }
 
 .flight-panel {
     overflow: hidden;
-    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    background: rgb(0 0 100 / 0.9);
     border: 1px solid var(--surface-border);
     border-radius: 16px;
 }
@@ -101,6 +92,7 @@ h2 {
 .flight-panel header {
     justify-content: space-between;
     padding: 16px 18px 8px;
+    color: var(--text-on-dark);
 }
 
 .status {
@@ -206,9 +198,8 @@ h2 {
     gap: 12px;
     margin-top: 18px;
     padding: 14px 16px;
-    background: var(--surface);
-    border: 1px solid var(--surface-border);
-    border-radius: 12px;
+    background: black;
+    border-radius: 16px;
 }
 
 .controls button {
@@ -217,7 +208,7 @@ h2 {
     border: 1px solid var(--surface-border);
     border-radius: 8px;
     background: transparent;
-    color: var(--text);
+    color: var(--text-on-dark);
     cursor: pointer;
 }
 
@@ -248,23 +239,40 @@ h2 {
 }
 
 /* 정보 더보기 버튼 */
-.info-button {
-    display: inline-block;
-    margin-top: 18px;
-    padding: 6px 10px;
-    border: 1px solid var(--surface-border);
-    border-radius: 7px;
-    color: var(--muted);
-    font-size: 0.82rem;
+.button-info {
+    display: block;
+    width: fit-content;
+    margin: 16px auto;
+    padding: 16px;
+    border: 2px solid black;
+    border-radius: 16px;
+    font-size: 2rem;
+    font-weight: 500;
+    background: linear-gradient(
+        120deg,
+        #ff0000,
+        #ff7f00,
+        #ffff00,
+        #00ff00,
+        #0000ff,
+        #4b0082,
+        #8b00ff,
+        #ff0000
+    );
+    background-size: 200% auto;
+    color: transparent;
+    -webkit-background-clip: text;
+    background-clip: text;
+    animation: rainbow-shine 0.5s linear infinite;
+    filter: drop-shadow(0 0 8px rgba(255, 255, 255, 0.8));
     text-decoration: none;
 }
 
-.write-button:hover {
+.button-info:hover {
     border-color: var(--muted);
-    color: var(--text);
 }
 
-.write-button:focus-visible {
+.button-info:focus-visible {
     outline: 2px solid var(--normal);
     outline-offset: 3px;
 }
@@ -288,5 +296,18 @@ h2 {
     *::before,
     *::after {
         scroll-behavior: auto !important;
+    }
+
+    .button-info {
+        animation: none;
+    }
+}
+
+@keyframes rainbow-shine {
+    0% {
+        background-position: 0% center;
+    }
+    100% {
+        background-position: 200% center;
     }
 }
