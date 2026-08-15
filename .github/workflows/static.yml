@@ -31,7 +31,8 @@ jobs:
           set -euo pipefail
           cmake -S . -B build
           cmake --build build --config Release --target c-rocket
-          ./build/c-rocket
+          mkdir -p output
+          ./build/c-rocket --csv output
 
           test "$(wc -l < output/unsafe.csv)" -eq 62
           test "$(wc -l < output/safe.csv)" -eq 62
@@ -44,7 +45,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p site/output
-          cp web/index.html web/app.js web/style.css site/
+          cp web/index.html web/app.js web/style.css web/info.html web/info-style.css site/
+          cp -r web/fonts site/
           cp output/unsafe.csv output/safe.csv site/output/
           sed -i 's#\.\./output/#output/#g' site/app.js
           touch site/.nojekyll
