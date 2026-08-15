@@ -1,3 +1,4 @@
+@import url("https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css");
 @font-face {
     font-family: 'SUITE';
     font-weight: 400;
@@ -8,11 +9,12 @@
 body {
     margin: 100px auto;
     max-width: 600px;
-    background: #fff5f0;
-    font-family: SUITE;
+    background: #ffffff;
+    font-family: Pretendard;
 }
 
 h1 {
+    font-family: SUITE;
     font-size: 3.5rem;
     font-weight: 500;
     line-height: 1.2;
@@ -20,12 +22,13 @@ h1 {
 }
 h2 {
     font-size: 1.25rem;
+    font-weight: 500;
     line-height: 1.4;
-    font-weight: 800;
 }
 p {
-    font-size: 1rem;
-    line-height: 1.4;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    color: #0c0c0c;
 }
 .source {
     font-size: 0.75rem;
@@ -37,4 +40,10 @@ img {
     display: block;
     max-width: 100%;
     margin: 0 auto;
+}
+hr {
+    border: none;
+    height: 1px;
+    background-color: #999999;
+    opacity: 40%;
 }
