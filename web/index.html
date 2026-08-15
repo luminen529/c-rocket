@@ -1,86 +1,85 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="ko">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>C Rocket Flight Control</title>
+    <title>5000억 원을 지키십시오</title>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <main class="simulator">
-        <header class="topbar">
-            <h1>C Rocket Flight Control</h1>
-            <output id="current-time" aria-live="polite">T+00s</output>
-        </header>
-
-        <section class="flight-grid" aria-label="UNSAFE와 SAFE 비행 비교">
-            <article class="flight-panel unsafe-panel">
-                <header>
-                    <h2>UNSAFE</h2>
-                    <span id="unsafe-status" class="status">NORMAL</span>
-                </header>
-                <svg id="unsafe-flight" viewBox="0 0 500 500" role="img"
-                    aria-label="UNSAFE 로켓 비행 궤적">
-                    <line class="ground" x1="20" y1="460" x2="480" y2="460"></line>
-                    <polyline class="trajectory" points=""></polyline>
-                    <g class="rocket" transform="translate(30 460)">
-                        <g class="rocket-art">
-                            <path class="rocket-body" d="M 0,-24 C 8,-18 10,-7 9,8 L 5,15 L -5,15 L -9,8 C -10,-7 -8,-18 0,-24 Z"></path>
-                            <circle class="rocket-window" cx="0" cy="-7" r="3.5"></circle>
-                            <path class="rocket-fin" d="M -7,5 L -15,16 L -5,13 Z M 7,5 L 15,16 L 5,13 Z"></path>
-                            <path class="rocket-nozzle" d="M -4,15 L 4,15 L 6,20 L -6,20 Z"></path>
-                            <path class="rocket-flame" d="M -4,20 Q 0,34 4,20 Q 0,27 -4,20 Z"></path>
-                        </g>
+<main class="simulator">
+    <header class="topbar">
+        <h1>로켓 날리기!</h1>
+        <output id="current-time" aria-live="polite">T+00s</output>
+    </header>
+    <section class="flight-grid" aria-label="사고 발생 모델과 정상 모델 비행 비교">
+        <article class="flight-panel unsafe-panel">
+            <header>
+                <h2>사고 발생 모델</h2>
+                <span id="unsafe-status" class="status">NORMAL</span>
+            </header>
+            <svg id="unsafe-flight" viewBox="0 0 500 500" role="img"
+                 aria-label="사고 발생 모델의 로켓 비행 궤적">
+                <line class="ground" x1="20" y1="460" x2="480" y2="460"></line>
+                <polyline class="trajectory" points=""></polyline>
+                <g class="rocket" transform="translate(30 460)">
+                    <g class="rocket-art">
+                        <path class="rocket-body" d="M 0,-24 C 8,-18 10,-7 9,8 L 5,15 L -5,15 L -9,8 C -10,-7 -8,-18 0,-24 Z"></path>
+                        <circle class="rocket-window" cx="0" cy="-7" r="3.5"></circle>
+                        <path class="rocket-fin" d="M -7,5 L -15,16 L -5,13 Z M 7,5 L 15,16 L 5,13 Z"></path>
+                        <path class="rocket-nozzle" d="M -4,15 L 4,15 L 6,20 L -6,20 Z"></path>
+                        <path class="rocket-flame" d="M -4,20 Q 0,34 4,20 Q 0,27 -4,20 Z"></path>
                     </g>
-                    <g class="explosion" aria-hidden="true">
-                        <path class="explosion-burst" d="M 0,-30 L 8,-13 L 26,-19 L 18,-4 L 34,5 L 15,10 L 18,29 L 3,17 L -8,32 L -12,14 L -32,18 L -20,1 L -34,-9 L -14,-12 Z"></path>
-                        <circle class="explosion-core" cx="0" cy="0" r="13"></circle>
-                        <g class="debris-pieces">
-                            <path d="M -4,-2 L 4,-5 L 2,4 Z"></path>
-                            <path d="M -3,-3 L 5,-1 L 0,5 Z"></path>
-                            <path d="M -5,-2 L 3,-4 L 4,3 Z"></path>
-                            <path d="M -4,-4 L 4,-2 L -1,5 Z"></path>
-                        </g>
+                </g>
+                <g class="explosion" aria-hidden="true">
+                    <path class="explosion-burst" d="M 0,-30 L 8,-13 L 26,-19 L 18,-4 L 34,5 L 15,10 L 18,29 L 3,17 L -8,32 L -12,14 L -32,18 L -20,1 L -34,-9 L -14,-12 Z"></path>
+                    <circle class="explosion-core" cx="0" cy="0" r="13"></circle>
+                    <g class="debris-pieces">
+                        <path d="M -4,-2 L 4,-5 L 2,4 Z"></path>
+                        <path d="M -3,-3 L 5,-1 L 0,5 Z"></path>
+                        <path d="M -5,-2 L 3,-4 L 4,3 Z"></path>
+                        <path d="M -4,-4 L 4,-2 L -1,5 Z"></path>
                     </g>
-                    <g class="wreckage" aria-hidden="true">
-                        <path d="M -8,-5 L 7,-8 L 11,2 L 1,7 L -10,4 Z"></path>
-                        <path class="smoke" d="M -4,4 C -14,14 -8,22 -20,31"></path>
+                </g>
+                <g class="wreckage" aria-hidden="true">
+                    <path d="M -8,-5 L 7,-8 L 11,2 L 1,7 L -10,4 Z"></path>
+                    <path class="smoke" d="M -4,4 C -14,14 -8,22 -20,31"></path>
+                </g>
+            </svg>
+        </article>
+        <article class="flight-panel safe-panel">
+            <header>
+                <h2>정상 모델</h2>
+                <span id="safe-status" class="status">NORMAL</span>
+            </header>
+            <svg id="safe-flight" viewBox="0 0 500 500" role="img"
+                 aria-label="정상 모델의 로켓 비행 궤적">
+                <line class="ground" x1="20" y1="460" x2="480" y2="460"></line>
+                <polyline class="trajectory" points=""></polyline>
+                <g class="rocket" transform="translate(30 460)">
+                    <g class="rocket-art">
+                        <path class="rocket-body" d="M 0,-24 C 8,-18 10,-7 9,8 L 5,15 L -5,15 L -9,8 C -10,-7 -8,-18 0,-24 Z"></path>
+                        <circle class="rocket-window" cx="0" cy="-7" r="3.5"></circle>
+                        <path class="rocket-fin" d="M -7,5 L -15,16 L -5,13 Z M 7,5 L 15,16 L 5,13 Z"></path>
+                        <path class="rocket-nozzle" d="M -4,15 L 4,15 L 6,20 L -6,20 Z"></path>
+                        <path class="rocket-flame" d="M -4,20 Q 0,34 4,20 Q 0,27 -4,20 Z"></path>
                     </g>
-                </svg>
-            </article>
-
-            <article class="flight-panel safe-panel">
-                <header>
-                    <h2>SAFE</h2>
-                    <span id="safe-status" class="status">NORMAL</span>
-                </header>
-                <svg id="safe-flight" viewBox="0 0 500 500" role="img"
-                    aria-label="SAFE 로켓 비행 궤적">
-                    <line class="ground" x1="20" y1="460" x2="480" y2="460"></line>
-                    <polyline class="trajectory" points=""></polyline>
-                    <g class="rocket" transform="translate(30 460)">
-                        <g class="rocket-art">
-                            <path class="rocket-body" d="M 0,-24 C 8,-18 10,-7 9,8 L 5,15 L -5,15 L -9,8 C -10,-7 -8,-18 0,-24 Z"></path>
-                            <circle class="rocket-window" cx="0" cy="-7" r="3.5"></circle>
-                            <path class="rocket-fin" d="M -7,5 L -15,16 L -5,13 Z M 7,5 L 15,16 L 5,13 Z"></path>
-                            <path class="rocket-nozzle" d="M -4,15 L 4,15 L 6,20 L -6,20 Z"></path>
-                            <path class="rocket-flame" d="M -4,20 Q 0,34 4,20 Q 0,27 -4,20 Z"></path>
-                        </g>
-                    </g>
-                </svg>
-            </article>
-        </section>
-
-        <section class="controls" aria-label="재생 조작">
-            <button id="play-pause" type="button">재생</button>
-            <button id="restart" type="button">처음</button>
-            <label for="timeline">시간</label>
-            <input id="timeline" type="range" min="0" max="60" value="0" step="1">
-        </section>
-
-        <p id="load-error" class="load-error" role="alert" hidden></p>
-    </main>
-
-    <script src="app.js"></script>
+                </g>
+            </svg>
+        </article>
+    </section>
+    <section class="controls" aria-label="재생 조작">
+        <button id="play-pause" type="button">재생</button>
+        <button id="restart" type="button">처음</button>
+        <label for="timeline">시간</label>
+        <input id="timeline" type="range" min="0" max="60" value="0" step="1">
+    </section>
+    <br>
+    <hr>
+    <br>
+    <a class="button-info" href="info.html" target="_blank" rel="noopener">더 많은 정보를 확인하기</a>
+    <p id="load-error" class="load-error" role="alert" hidden></p>
+</main>
+<script src="app.js"></script>
 </body>
 </html>
