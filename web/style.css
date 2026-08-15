@@ -1,3 +1,10 @@
+@font-face {
+    font-family: 'SUITE';
+    font-weight: 400;
+    font-style: normal;
+    src: url('./fonts/SUITE-Regular.woff2') format('woff2');
+}
+
 :root {
     color-scheme: dark;
     --background: #08111f;
@@ -28,7 +35,7 @@ body {
         radial-gradient(circle at 50% -20%, #173258 0, transparent 46%),
         var(--background);
     color: var(--text);
-    font-family: "Segoe UI", "Noto Sans KR", sans-serif;
+    font-family: "SUITE", "Segoe UI", "Noto Sans KR", sans-serif;
 }
 
 button,
@@ -238,6 +245,27 @@ h2 {
 .load-error {
     margin-top: 16px;
     color: var(--unsafe);
+}
+
+.write-button {
+    display: inline-block;
+    margin-top: 18px;
+    padding: 6px 10px;
+    border: 1px solid var(--surface-border);
+    border-radius: 7px;
+    color: var(--muted);
+    font-size: 0.82rem;
+    text-decoration: none;
+}
+
+.write-button:hover {
+    border-color: var(--muted);
+    color: var(--text);
+}
+
+.write-button:focus-visible {
+    outline: 2px solid var(--normal);
+    outline-offset: 3px;
 }
 
 @media (max-width: 720px) {
