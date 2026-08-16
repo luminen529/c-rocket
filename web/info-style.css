@@ -26,12 +26,12 @@ h2 {
     line-height: 1.4;
 }
 p {
-    font-size: 1rem;
+    font-size: 1.0625rem;
     line-height: 1.6;
     color: #0c0c0c;
 }
 .source {
-    font-size: 0.75rem;
+    font-size: 0.9375rem;
     line-height: 1;
     color: #aaaaaa;
     text-align: center;
