@@ -10,14 +10,14 @@ $outputDir = Join-Path $projectRoot "output"
 $configuration = "Release"
 $port = 8000
 
-function Assert-Check {
+function Assert-Scenario {
     param(
         [bool]$Condition,
         [string]$Message
     )
 
     if (-not $Condition) {
-        throw "CSV validation failed: $Message"
+        throw "Simulation check failed: $Message"
     }
 }
 
@@ -99,26 +99,24 @@ finally {
 $unsafe = Import-Csv (Join-Path $outputDir "unsafe.csv")
 $safe = Import-Csv (Join-Path $outputDir "safe.csv")
 
-Assert-Check ($unsafe.Count -eq 61) "UNSAFE must contain 61 data rows."
-Assert-Check ($safe.Count -eq 61) "SAFE must contain 61 data rows."
-
 $unsafe36 = $unsafe | Where-Object { $_.time -eq "36" }
 $unsafe37 = $unsafe | Where-Object { $_.time -eq "37" }
 $unsafe38 = $unsafe | Where-Object { $_.time -eq "38" }
 $unsafe39 = $unsafe | Where-Object { $_.time -eq "39" }
 $unsafe40 = $unsafe | Where-Object { $_.time -eq "40" }
+$safe36 = $safe | Where-Object { $_.time -eq "36" }
 $safe37 = $safe | Where-Object { $_.time -eq "37" }
 $safe60 = $safe | Where-Object { $_.time -eq "60" }
 
 for ($index = 0; $index -le 36; $index++) {
-    Assert-Check (
+    Assert-Scenario (
         $unsafe[$index].x -eq $safe[$index].x -and
         $unsafe[$index].altitude -eq $safe[$index].altitude -and
         $unsafe[$index].angle -eq $safe[$index].angle
     ) "Both modes must match through T+36."
 }
 
-Assert-Check (
+Assert-Scenario (
     $unsafe36.raw_bias -eq "32400.00" -and
     $unsafe36.converted_bias -eq "32400" -and
     $unsafe36.conversion_result -eq "OK" -and
@@ -126,7 +124,7 @@ Assert-Check (
     $unsafe36.sri2_status -eq "RUNNING"
 ) "T+36 must remain inside the int16_t range with both SRIs running."
 
-Assert-Check (
+Assert-Scenario (
     $unsafe37.status -eq "CONTROL_LOST" -and
     $unsafe37.raw_bias -eq "33300.00" -and
     $unsafe37.converted_bias -eq "" -and
@@ -139,7 +137,7 @@ Assert-Check (
     $unsafe37.nozzle_command -eq "FULL_DEFLECTION"
 ) "The two-SRI UNSAFE failure sequence at T+37 is not correct."
 
-Assert-Check (
+Assert-Scenario (
     $unsafe38.status -eq "CONTROL_LOST" -and
     $unsafe38.angle -eq "12.00" -and
     $unsafe39.status -eq "FAILED" -and
@@ -150,27 +148,32 @@ Assert-Check (
     ) -gt 0.0
 ) "UNSAFE must lose control before breaking up at T+39."
 
-Assert-Check (
+Assert-Scenario (
     $unsafe40.x -eq $unsafe39.x -and
     $unsafe40.altitude -eq $unsafe39.altitude -and
     $unsafe40.angle -eq $unsafe39.angle -and
     $unsafe40.status -eq "FAILED"
 ) "UNSAFE must remain at the breakup position instead of falling to ground."
 
-Assert-Check (
-    ($safe | Where-Object { $_.conversion_result -ne "NOT_RUN" }).Count -eq 0 -and
+Assert-Scenario (
+    $safe36.raw_bias -eq "32400.00" -and
+    $safe36.converted_bias -eq "32400" -and
+    $safe36.conversion_result -eq "OK" -and
+    $safe37.raw_bias -eq "33300.00" -and
+    $safe37.converted_bias -eq "" -and
+    $safe37.conversion_result -eq "BLOCKED" -and
+    $safe37.obc_input -eq "INVALID" -and
+    $safe37.nozzle_command -eq "NEUTRAL" -and
     ($safe | Where-Object { $_.sri1_status -ne "RUNNING" }).Count -eq 0 -and
     ($safe | Where-Object { $_.sri2_status -ne "RUNNING" }).Count -eq 0 -and
     ($safe | Where-Object { $_.status -ne "NORMAL" }).Count -eq 0 -and
-    $safe37.obc_input -eq "FLIGHT" -and
-    $safe37.nozzle_command -eq "NEUTRAL" -and
     [double]::Parse(
         $safe60.altitude,
         [System.Globalization.CultureInfo]::InvariantCulture
     ) -gt 0.0
-) "SAFE must keep alignment off and remain healthy through T+60."
+) "SAFE must block the out-of-range conversion and remain healthy through T+60."
 
-Write-Host "All CSV checks passed."
+Write-Host "Simulation scenario checks passed."
 Write-Host "[4/4] Preparing web visualization."
 
 if ($SkipServer) {

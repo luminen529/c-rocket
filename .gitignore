@@ -3,15 +3,9 @@
 /cmake-build-*/
 /.cmake/
 
-## Generated simulation output
-output/
-
 ## Generated native debug artifacts outside CMake build directories
 /src/main.exe
 /src/output/
-
-## IntelliJ IDEA project files
-.idea/
 
 ## CMake generated files when configured in the project root
 CMakeCache.txt
@@ -24,3 +18,5 @@ build.ninja
 compile_commands.json
 
 AGENTS.md
+.idea/
+output/

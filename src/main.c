@@ -80,10 +80,8 @@ typedef struct {
     NozzleCommand nozzle_command;
 } GuidanceSystem;
 
-typedef SensorData (*SriRunner)(GuidanceSystem *system,
-                               const RocketState *rocket);
+typedef SensorData (*SriRunner)(GuidanceSystem *system, const RocketState *rocket);
 
-// ----- 시뮬레이션 모드와 상태를 문자열로 변환하는 헬퍼 함수 -----
 static const char *mode_name(SimulationMode mode)
 {
     return mode == MODE_UNSAFE ? "UNSAFE" : "SAFE";
@@ -144,7 +142,7 @@ static const char *sri_status_name(const SRIState *sri)
     return sri->operational ? "RUNNING" : "STOPPED";
 }
 
-// ----- 시뮬레이션 init -----
+// rocket 상태 init
 static void init_rocket(RocketState *rocket)
 {
     rocket->time = 0.0;
@@ -170,18 +168,16 @@ static void init_guidance(GuidanceSystem *system)
     system->nozzle_command = NOZZLE_NEUTRAL;
 }
 
-/*
- * C에서 범위를 벗어난 실수 -> 정수 캐스트는 정의되지 않은 동작이므로
- * 실제 캐스트를 실행하지 않고 범위 검사로 두 시나리오의 결과를 모델링한다.
- */
-static int bias_in_int16_range(double value)
+// 변환 범위 검사
+static int is_in_int16_range(double value)
 {
     return value >= (double)INT16_MIN && value <= (double)INT16_MAX;
 }
 
+// unsafe 변환
 static ConversionResult convert_bias_unsafe(double value, int16_t *result)
 {
-    if (!bias_in_int16_range(value)) {
+    if (!is_in_int16_range(value)) {
         return CONVERSION_OPERAND_ERROR;
     }
 
@@ -193,9 +189,10 @@ static ConversionResult convert_bias_unsafe(double value, int16_t *result)
     return CONVERSION_OK;
 }
 
+// safe 변환
 static ConversionResult convert_bias_safe(double value, int16_t *result)
 {
-    if (result == NULL || !bias_in_int16_range(value)) {
+    if (result == NULL || !is_in_int16_range(value)) {
         return CONVERSION_BLOCKED;
     }
 
