@@ -5,7 +5,7 @@
 동일한 입력을 두 모드로 실행합니다.
 
 - `UNSAFE`: 두 관성 기준 장치(SRI)가 같은 형변환 오류로 차례로 정지하고, 진단 데이터가 비행 데이터로 해석되어 제어 상실과 기체 파괴로 이어집니다.
-- `SAFE`: 이륙 후 불필요한 정렬 작업을 중단하고 형변환과 입력 데이터도 검증하여 정상 비행을 계속합니다.
+- `SAFE`: 같은 정렬 계산을 실행하되 16비트 범위를 벗어난 형변환을 차단하고 정상 비행을 계속합니다.
 
 이 프로젝트는 실제 로켓의 물리 모델이나 아리안 5 소프트웨어를 복제하지 않습니다. 대신 조사보고서에 기록된 핵심 사건의 순서와 작은 자료형 오류가 센서, 항법, 제어 단계로 전파되는 과정을 비교합니다.
 
@@ -23,7 +23,7 @@ output/safe.csv
 두 실행 경로는 분리되어 있습니다.
 
 - C 프로그램 단독 실행: 콘솔 로그와 CSV 생성만 수행하며 웹 서버나 Python에 의존하지 않습니다.
-- `run.ps1` 실행: CMake configure/build, 시뮬레이션, CSV 검증을 수행한 뒤 웹 시각화 서버를 실행합니다.
+- `run.ps1` 실행: CMake configure/build, 시뮬레이션 시나리오 검증, CSV 생성을 수행한 뒤 웹 시각화 서버를 실행합니다.
 
 ## 빠른 실행
 
@@ -43,7 +43,7 @@ output/safe.csv
 
 1. CMake configure
 2. CMake를 통한 C 프로그램 빌드
-3. UNSAFE/SAFE 시뮬레이션 및 CSV 생성과 시나리오 검증
+3. UNSAFE/SAFE 시뮬레이션, CSV 생성 및 시나리오 검증
 4. `http://localhost:8000/web/` 실행
 
 웹 사이트 없이 C 프로그램만 실행하려면 다음처럼 CMake로 빌드한 실행 파일을 실행합니다. 아래 경로는 Ninja/MinGW 단일 구성 빌드 기준입니다.
@@ -62,7 +62,7 @@ PowerShell 실행 정책으로 스크립트가 차단되면 현재 실행에만 
 powershell -ExecutionPolicy Bypass -File .\run.ps1
 ```
 
-웹 서버를 열지 않고 컴파일과 자동 검증만 실행하려면 다음 옵션을 사용합니다.
+웹 서버를 열지 않고 컴파일과 시나리오 검증만 실행하려면 다음 옵션을 사용합니다.
 
 ```powershell
 .\run.ps1 -SkipServer
@@ -73,13 +73,23 @@ powershell -ExecutionPolicy Bypass -File .\run.ps1
 실제 SRI의 Ada 코드는 보호되지 않은 변환에서 `Operand Error`를 발생시켰습니다. C에서 범위를 벗어난 실수를 작은 정수형으로 직접 변환하면 정의되지 않은 동작이 되므로, 이 프로그램은 오류 결과를 명시적으로 모델링합니다.
 
 ```c
-if (value < (double)INT16_MIN || value > (double)INT16_MAX) {
-    return mode == MODE_UNSAFE
-               ? CONVERSION_OPERAND_ERROR
-               : CONVERSION_BLOCKED;
+ConversionResult convert_bias_unsafe(double value, int16_t *result)
+{
+    if (value < (double)INT16_MIN || value > (double)INT16_MAX) {
+        return CONVERSION_OPERAND_ERROR;
+    }
+    *result = (int16_t)value;
+    return CONVERSION_OK;
 }
 
-*result = (int16_t)value;
+ConversionResult convert_bias_safe(double value, int16_t *result)
+{
+    if (value < (double)INT16_MIN || value > (double)INT16_MAX) {
+        return CONVERSION_BLOCKED;
+    }
+    *result = (int16_t)value;
+    return CONVERSION_OK;
+}
 ```
 
 따라서 실제 정의되지 않은 동작에 의존하지 않으면서도 UNSAFE의 프로세서 정지와 SAFE의 방어 동작을 항상 같은 방식으로 확인할 수 있습니다.
@@ -91,7 +101,7 @@ horizontal_velocity(T+36) = 1080
 horizontal_bias(T+36)     = 32400  → 변환 성공
 
 horizontal_velocity(T+37) = 1110
-horizontal_bias(T+37)     = 33300  → Operand Error
+horizontal_bias(T+37)     = 33300  → UNSAFE: Operand Error / SAFE: BLOCKED
 ```
 
 이 수치와 단위는 실제 아리안 5의 비행 데이터를 뜻하지 않습니다. 오류 발생 시점과 약 3.5km였던 당시 고도를 알아보기 쉽게 보여주기 위한 학습용 값입니다.
@@ -131,4 +141,4 @@ c-rocket/
 - UNSAFE에서는 T+36.928에 백업 SRI 1, T+37.000에 활성 SRI 2가 정지합니다.
 - T+37에 OBC가 진단 데이터를 받아 노즐 완전 편향을 명령하고 `CONTROL_LOST`가 됩니다.
 - T+39에 받음각이 20도를 넘어 기체가 파괴되며, 실제 사고처럼 지상 추락은 따로 계산하지 않습니다.
-- SAFE는 정렬 변환을 실행하지 않으며 두 SRI와 정상 비행 데이터를 T+60까지 유지합니다.
+- SAFE는 같은 정렬 변환을 실행하지만 T+37의 범위 밖 변환을 차단하고 두 SRI와 정상 비행 데이터를 T+60까지 유지합니다.

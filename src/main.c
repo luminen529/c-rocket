@@ -2,25 +2,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <errno.h>
-
-#if defined(_WIN32)
 #include <direct.h>
-#else
-#include <sys/stat.h>
-#endif
 
 #define TOTAL_TIME 60
 #define DT 1.0  // 갱신 간격
-
 // 시뮬레이션 상수 -> 단순화됨
 #define HORIZONTAL_ACCELERATION 30.0
 #define VERTICAL_ACCELERATION 5.0
 #define BIAS_SCALE 30.0  // 수평 속도 센서 변환 상수
 #define ABNORMAL_TURN_RATE 12.0  // 비정상적인 회전 속도
 #define ANGLE_OF_ATTACK_LIMIT 20.0  // 한계 각도
-
 /* SRI는 프랑스어 Système de Référence Inertielle의 약자로, 영어로는 Inertial Reference System,
- * 한국어로는 관성 기준 장치입니다.(?) -> 실패 이벤트 발생 관련 정의인듯*/
+ * 한국어로는 관성 기준 장치입니다. -> 실패 이벤트 발생 관련 정의인듯 */
 #define SRI_CYCLE_SECONDS 0.072
 #define ACTIVE_SRI_FAILURE_TIME 37.0
 #define BACKUP_SRI_FAILURE_TIME \
@@ -28,8 +21,8 @@
 #define BREAKUP_TIME 39.0
 
 typedef enum {
-    MODE_UNSAFE,  // 이륙 후에도 정렬 작업을 계속 실행하는 사고 경로
-    MODE_SAFE  // 이륙 후 정렬 작업을 시작하지 않고 방어적으로 차단하는 정상 경로(예외처리가 적용됨?)
+    MODE_UNSAFE,  // 같은 정렬 변환을 보호 없이 실행하는 사고 경로
+    MODE_SAFE  // 같은 정렬 변환을 실행하되 범위를 벗어난 변환을 차단하는 보호 경로
 } SimulationMode;
 
 typedef enum {
@@ -58,7 +51,6 @@ typedef enum {
 
 typedef struct {
     int operational;
-    int alignment_active;
     double failure_time;
 } SRIState;
 
@@ -87,6 +79,9 @@ typedef struct {
     DataKind obc_input;
     NozzleCommand nozzle_command;
 } GuidanceSystem;
+
+typedef SensorData (*SriRunner)(GuidanceSystem *system,
+                               const RocketState *rocket);
 
 // ----- 시뮬레이션 모드와 상태를 문자열로 변환하는 헬퍼 함수 -----
 static const char *mode_name(SimulationMode mode)
@@ -161,48 +156,46 @@ static void init_rocket(RocketState *rocket)
     rocket->status = STATUS_NORMAL;
 }
 
-static void init_sri(SRIState *sri, SimulationMode mode)
+static void init_sri(SRIState *sri)
 {
     sri->operational = 1;
-    sri->alignment_active = mode == MODE_UNSAFE ? 1 : 0;
     sri->failure_time = -1.0;
 }
 
-static void init_guidance(GuidanceSystem *system, SimulationMode mode)
+static void init_guidance(GuidanceSystem *system)
 {
-    init_sri(&system->sri1_backup, mode);
-    init_sri(&system->sri2_active, mode);
+    init_sri(&system->sri1_backup);
+    init_sri(&system->sri2_active);
     system->obc_input = DATA_FLIGHT;
     system->nozzle_command = NOZZLE_NEUTRAL;
 }
 
 /*
- * Model the Ada conversion without executing an out-of-range C cast.
- * Such a cast is undefined behavior in C and would not deterministically
- * reproduce the SRI processor's Operand Error.
+ * C에서 범위를 벗어난 실수 -> 정수 캐스트는 정의되지 않은 동작이므로
+ * 실제 캐스트를 실행하지 않고 범위 검사로 두 시나리오의 결과를 모델링한다.
  */
-static ConversionResult model_bias_conversion(double value,
-                                               SimulationMode mode,
-                                               int alignment_active,
-                                               int16_t *result)
+static int bias_in_int16_range(double value)
 {
-    /* SAFE 경로: 정렬 작업이 꺼져 있으면 문제가 되는 변환 자체를 실행하지 않는다. */
-    if (!alignment_active) {
-        return CONVERSION_NOT_RUN;
-    }
+    return value >= (double)INT16_MIN && value <= (double)INT16_MAX;
+}
 
-    /*
-     * 정렬 작업이 실행되는 경우의 범위 검사다.
-     * [UNSAFE] 범위를 넘으면 SRI 프로세서의 Operand Error로 모델링한다.
-     * [SAFE]   범위를 넘는 값을 변환하지 않고 BLOCKED로 차단한다.
-     */
-    if (value < (double)INT16_MIN || value > (double)INT16_MAX) {
-        return mode == MODE_UNSAFE
-                   ? CONVERSION_OPERAND_ERROR
-                   : CONVERSION_BLOCKED;
+static ConversionResult convert_bias_unsafe(double value, int16_t *result)
+{
+    if (!bias_in_int16_range(value)) {
+        return CONVERSION_OPERAND_ERROR;
     }
 
     if (result == NULL) {
+        return CONVERSION_OPERAND_ERROR;
+    }
+
+    *result = (int16_t)value;
+    return CONVERSION_OK;
+}
+
+static ConversionResult convert_bias_safe(double value, int16_t *result)
+{
+    if (result == NULL || !bias_in_int16_range(value)) {
         return CONVERSION_BLOCKED;
     }
 
@@ -216,49 +209,33 @@ static void stop_sri(SRIState *sri, double failure_time)
     sri->failure_time = failure_time;
 }
 
-/*
- * 활성 SRI를 실행하고, 한 데이터 주기 앞선 백업 SRI의 상태도 모델링한다.
- *
- * 공통 흐름은 다음과 같다.
- * 1. SRI가 멈췄으면 진단 데이터를 내보낸다.
- * 2. 정렬 작업이 꺼진 SAFE에서는 정상 비행 데이터가 그대로 유지된다.
- * 3. 정렬 작업이 켜진 UNSAFE에서는 bias를 계산하고 형변환 결과를 처리한다.
- */
-static SensorData run_sri(GuidanceSystem *system,
-                          const RocketState *rocket,
-                          SimulationMode mode)
+static SensorData initial_sensor_data(void)
 {
     SensorData sensor = {0};
-
     sensor.conversion_result = CONVERSION_NOT_RUN;
     sensor.output_kind = DATA_FLIGHT;
     sensor.valid = 1;
 
+    return sensor;
+}
+
+/* 실제 사고 경로: 범위를 넘으면 두 SRI가 정지하고 진단 패턴을 내보낸다. */
+static SensorData run_sri_unsafe(GuidanceSystem *system,
+                                 const RocketState *rocket)
+{
+    SensorData sensor = initial_sensor_data();
+
     if (!system->sri2_active.operational) {
-        /* 두 SRI가 멈춘 뒤에는 정상 비행 데이터가 아니라 진단 패턴이 나온다. */
+        /* 정지한 SRI는 비행 데이터 대신 진단 패턴을 내보낸다. */
         sensor.output_kind = DATA_DIAGNOSTIC;
         sensor.valid = 0;
         return sensor;
     }
 
-    if (!system->sri2_active.alignment_active) {
-        /* SAFE 경로: 정렬 변환을 실행하지 않고 유효한 비행 데이터를 유지한다. */
-        return sensor;
-    }
-
-    /* UNSAFE 경로: 정렬 작업이 계산한 수평 bias를 16비트 정수로 변환한다. */
     sensor.bias_calculated = 1;
     sensor.raw_bias = rocket->horizontal_velocity * BIAS_SCALE;
-    sensor.conversion_result = model_bias_conversion(
-        sensor.raw_bias,
-        mode,
-        system->sri2_active.alignment_active,
-        &sensor.converted_bias
-    );
-
-    if (sensor.conversion_result == CONVERSION_OK) {
-        return sensor;
-    }
+    sensor.conversion_result =
+        convert_bias_unsafe(sensor.raw_bias, &sensor.converted_bias);
 
     if (sensor.conversion_result == CONVERSION_OPERAND_ERROR) {
         /*
@@ -269,8 +246,29 @@ static SensorData run_sri(GuidanceSystem *system,
         stop_sri(&system->sri2_active, ACTIVE_SRI_FAILURE_TIME);
         sensor.output_kind = DATA_DIAGNOSTIC;
         sensor.valid = 0;
-    } else {
-        /* SAFE의 방어 경로 또는 기타 변환 실패: 입력만 무효화하고 SRI는 살린다. */
+    }
+
+    return sensor;
+}
+
+/* 보호 경로: 같은 변환을 실행하되 범위를 넘으면 SRI를 살리고 입력을 무효화한다. */
+static SensorData run_sri_safe(GuidanceSystem *system,
+                               const RocketState *rocket)
+{
+    SensorData sensor = initial_sensor_data();
+
+    if (!system->sri2_active.operational) {
+        sensor.output_kind = DATA_INVALID;
+        sensor.valid = 0;
+        return sensor;
+    }
+
+    sensor.bias_calculated = 1;
+    sensor.raw_bias = rocket->horizontal_velocity * BIAS_SCALE;
+    sensor.conversion_result =
+        convert_bias_safe(sensor.raw_bias, &sensor.converted_bias);
+
+    if (sensor.conversion_result != CONVERSION_OK) {
         sensor.output_kind = DATA_INVALID;
         sensor.valid = 0;
     }
@@ -278,9 +276,7 @@ static SensorData run_sri(GuidanceSystem *system,
     return sensor;
 }
 
-static void run_obc(GuidanceSystem *system,
-                    const SensorData *sensor,
-                    SimulationMode mode)
+static void run_obc(GuidanceSystem *system, const SensorData *sensor)
 {
     if (sensor->valid && sensor->output_kind == DATA_FLIGHT) {
         /* 두 모드의 정상 경로: 비행 데이터를 사용하고 노즐은 중립을 유지한다. */
@@ -289,9 +285,9 @@ static void run_obc(GuidanceSystem *system,
         return;
     }
 
-    if (mode == MODE_UNSAFE && sensor->output_kind == DATA_DIAGNOSTIC) {
+    if (sensor->output_kind == DATA_DIAGNOSTIC) {
         /*
-         * UNSAFE 사고 경로: 진단 패턴을 비행 데이터처럼 잘못 받아들인다.
+         * 사고 경로: 진단 패턴을 비행 데이터처럼 잘못 받아들인다.
          * 그 결과 OBC가 노즐을 끝까지 편향시키고 제어 상실을 유발한다.
          */
         system->obc_input = DATA_DIAGNOSTIC;
@@ -402,7 +398,7 @@ static void write_csv_row(FILE *file,
             status_name(rocket->status));
 }
 
-static void print_step_log(SimulationMode mode,
+static void print_console_log(SimulationMode mode,
                            const RocketState *rocket,
                            const GuidanceSystem *system,
                            const SensorData *sensor)
@@ -435,25 +431,15 @@ static void print_step_log(SimulationMode mode,
     }
 }
 
-static int ensure_output_directory(void)
+static int create_output_directory(void)
 {
-    int result;
-
-#if defined(_WIN32)
-    result = _mkdir("output");
-#else
-    result = mkdir("output", 0777);
-#endif
-
-    if (result == 0 || errno == EEXIST) {
+    if (_mkdir("output") == 0 || errno == EEXIST) {
         return 0;
     }
-
     fprintf(stderr, "Cannot create output directory: %s\n", "output");
     return 1;
 }
 
-// 시뮬레이션 실행 함수
 static int run_simulation(SimulationMode mode, const char *file_name)
 {
     // 선언과 init
@@ -472,16 +458,18 @@ static int run_simulation(SimulationMode mode, const char *file_name)
         return 1;
     }
     init_rocket(&rocket);
-    init_guidance(&system, mode);
+    init_guidance(&system);
+    SriRunner sri_runner =
+        mode == MODE_UNSAFE ? &run_sri_unsafe : &run_sri_safe;
     write_csv_header(file);
     printf("\n=== SITUATION: %s ===\n", mode_name(mode));
 
     for (int step = 0; step <= TOTAL_TIME; ++step) {
-        SensorData sensor = run_sri(&system, &rocket, mode);
+        SensorData sensor = sri_runner(&system, &rocket);
 
-        run_obc(&system, &sensor, mode);
+        run_obc(&system, &sensor);
         apply_guidance(&rocket, &system);
-        print_step_log(mode, &rocket, &system, &sensor);
+        print_console_log(mode, &rocket, &system, &sensor);
         write_csv_row(file, mode, &rocket, &system, &sensor);
 
         if (step < TOTAL_TIME) {
@@ -492,24 +480,17 @@ static int run_simulation(SimulationMode mode, const char *file_name)
     return 0;
 }
 
-int main(int argc, char *argv[])
+int main(void)
 {
-    // 인자 오류 처리
-    if (argc != 1) {
-        fprintf(stderr, "Usage: %s\n", argv[0]);
+    if (create_output_directory()) {
         return 1;
     }
-    if (ensure_output_directory()) {
-        return 1;
-    }
-    // run_simulation() 이 종료코드 '1'(오류)를 반환하면 종료코드 1로 종료
-    // if 내부에서 0 = F, 1 = T
     if (run_simulation(MODE_UNSAFE, "output/unsafe.csv")) {
         return 1;
     }
     if (run_simulation(MODE_SAFE, "output/safe.csv")) {
         return 1;
     }
-    printf("\nCSV files created in output/.\n");
+    printf("\nDONE.\n");
     return 0;
 }
