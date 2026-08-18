@@ -32,7 +32,14 @@ jobs:
           cmake -S . -B build
           cmake --build build --config Release --target c-rocket
           mkdir -p output
-          ./build/c-rocket --csv output
+          if [[ -x ./c-rocket ]]; then
+            ./c-rocket
+          elif [[ -x ./build/c-rocket ]]; then
+            ./build/c-rocket
+          else
+            echo "c-rocket executable was not produced by CMake" >&2
+            exit 1
+          fi
 
           test "$(wc -l < output/unsafe.csv)" -eq 62
           test "$(wc -l < output/safe.csv)" -eq 62

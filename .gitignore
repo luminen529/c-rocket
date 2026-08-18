@@ -4,6 +4,8 @@
 /.cmake/
 
 ## Generated native debug artifacts outside CMake build directories
+/c-rocket
+/c-rocket.exe
 /src/main.exe
 /src/output/
 

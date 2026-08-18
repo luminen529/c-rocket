@@ -67,6 +67,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $programCandidates = @(
+    (Join-Path $projectRoot "c-rocket.exe"),
     (Join-Path $buildDir "c-rocket.exe"),
     (Join-Path (Join-Path $buildDir $configuration) "c-rocket.exe")
 )
@@ -81,7 +82,7 @@ if (-not $program) {
 }
 
 if (-not $program) {
-    throw "CMake built the target, but c-rocket.exe was not found in $buildDir."
+    throw "CMake built the target, but c-rocket.exe was not found in the project or build directories."
 }
 
 Write-Host "[3/4] Running UNSAFE and SAFE simulations."

@@ -11,7 +11,7 @@
 
 ## 실행 화면
 
-C 프로그램(`main.c` 또는 CMake로 생성한 `c-rocket.exe`)은 웹 서버 없이도 T+0부터 T+60까지 콘솔 로그를 출력하고, 실행 위치의 `output/` 디렉터리를 자동으로 만든 뒤 다음 CSV를 생성합니다.
+C 프로그램(`main.c` 또는 CMake로 생성한 `c-rocket.exe`)은 웹 서버 없이도 T+0부터 T+60까지 콘솔 로그를 출력하고, 프로젝트 루트의 `output/` 디렉터리를 자동으로 만든 뒤 다음 CSV를 생성합니다.
 
 ```text
 output/unsafe.csv
@@ -51,7 +51,7 @@ output/safe.csv
 ```powershell
 cmake -S . -B build
 cmake --build build --config Release
-.\build\c-rocket.exe
+.\c-rocket.exe
 ```
 
 이 실행은 콘솔 로그와 `output/unsafe.csv`, `output/safe.csv` 생성까지만 수행합니다.
@@ -114,7 +114,8 @@ c-rocket/
 ├─ src/main.c       # C 시뮬레이션, 콘솔 로그, CSV 출력
 ├─ web/             # HTML/CSS/JavaScript/SVG 시각화
 ├─ output/          # 실행으로 생성되는 CSV
-├─ build/           # 실행으로 생성되는 프로그램
+├─ build/           # CMake 중간/보조 빌드 파일
+├─ c-rocket.exe     # 빌드 결과 실행 파일
 └─ run.ps1          # 컴파일, 검증, 웹 서버 실행
 ```
 

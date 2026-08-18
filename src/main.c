@@ -2,7 +2,16 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <errno.h>
+
+#if defined(_WIN32)
 #include <direct.h>
+#else
+#include <sys/stat.h>
+#endif
+
+#ifndef C_ROCKET_OUTPUT_DIR
+#define C_ROCKET_OUTPUT_DIR "output"
+#endif
 
 #define TOTAL_TIME 60
 #define DT 1.0  // 갱신 간격
@@ -430,10 +439,18 @@ static void print_console_log(SimulationMode mode,
 
 static int create_output_directory(void)
 {
-    if (_mkdir("output") == 0 || errno == EEXIST) {
+    int result;
+
+#if defined(_WIN32)
+    result = _mkdir(C_ROCKET_OUTPUT_DIR);
+#else
+    result = mkdir(C_ROCKET_OUTPUT_DIR, 0777);
+#endif
+
+    if (result == 0 || errno == EEXIST) {
         return 0;
     }
-    fprintf(stderr, "Cannot create output directory: %s\n", "output");
+    fprintf(stderr, "Cannot create output directory: %s\n", C_ROCKET_OUTPUT_DIR);
     return 1;
 }
 
@@ -482,10 +499,10 @@ int main(void)
     if (create_output_directory()) {
         return 1;
     }
-    if (run_simulation(MODE_UNSAFE, "output/unsafe.csv")) {
+    if (run_simulation(MODE_UNSAFE, C_ROCKET_OUTPUT_DIR "/unsafe.csv")) {
         return 1;
     }
-    if (run_simulation(MODE_SAFE, "output/safe.csv")) {
+    if (run_simulation(MODE_SAFE, C_ROCKET_OUTPUT_DIR "/safe.csv")) {
         return 1;
     }
     printf("\nDONE.\n");
