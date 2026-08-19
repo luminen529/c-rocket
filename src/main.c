@@ -231,6 +231,17 @@ static SensorData run_sri_unsafe(GuidanceSystem *system,
 {
     SensorData sensor = initial_sensor_data();
 
+    /*
+     * The backup SRI fails during the previous 72 ms data cycle.  With the
+     * one-second simulation step, apply that scheduled event at the first
+     * sampled time after its exact failure time, before evaluating the active
+     * SRI's conversion.
+     */
+    if (system->sri1_backup.operational &&
+        rocket->time >= BACKUP_SRI_FAILURE_TIME) {
+        stop_sri(&system->sri1_backup, BACKUP_SRI_FAILURE_TIME);
+    }
+
     if (!system->sri2_active.operational) {
         /* 정지한 SRI는 비행 데이터 대신 진단 패턴을 내보낸다. */
         sensor.output_kind = DATA_DIAGNOSTIC;
@@ -245,10 +256,10 @@ static SensorData run_sri_unsafe(GuidanceSystem *system,
 
     if (sensor.conversion_result == CONVERSION_OPERAND_ERROR) {
         /*
-         * UNSAFE 사고 경로: 활성 SRI의 변환 오류와 그보다 72 ms 앞선
-         * 백업 SRI의 정지를 함께 기록한다. 따라서 백업 전환도 불가능하다.
+         * UNSAFE 사고 경로: 백업 SRI 1은 이미 이전 데이터 주기에
+         * 정지했고, 활성 SRI 2가 이번 변환 오류로 정지한다. 따라서
+         * OBC가 백업으로 전환할 수 없다.
          */
-        stop_sri(&system->sri1_backup, BACKUP_SRI_FAILURE_TIME);
         stop_sri(&system->sri2_active, ACTIVE_SRI_FAILURE_TIME);
         sensor.output_kind = DATA_DIAGNOSTIC;
         sensor.valid = 0;
@@ -293,10 +304,11 @@ static void run_obc(GuidanceSystem *system, const SensorData *sensor)
 
     if (sensor->output_kind == DATA_DIAGNOSTIC) {
         /*
-         * 사고 경로: 진단 패턴을 비행 데이터처럼 잘못 받아들인다.
-         * 그 결과 OBC가 노즐을 끝까지 편향시키고 제어 상실을 유발한다.
+         * 사고 경로: 백업 SRI를 사용할 수 없으므로 OBC가 진단 비트
+         * 패턴을 비행 데이터로 잘못 해석한다. 그 결과 노즐을 끝까지
+         * 편향시키고 제어 상실을 유발한다.
          */
-        system->obc_input = DATA_DIAGNOSTIC;
+        system->obc_input = DATA_FLIGHT;
         system->nozzle_command = NOZZLE_FULL_DEFLECTION;
         return;
     }
@@ -426,7 +438,7 @@ static void print_console_log(SimulationMode mode,
         printf("  -> %.3f: active SRI 2 Operand Error, BH=%.0f\n",
                system->sri2_active.failure_time,
                sensor->raw_bias);
-        printf("  -> OBC: backup unavailable; diagnostic pattern accepted\n");
+        printf("  -> OBC: backup unavailable; diagnostic pattern interpreted as flight data\n");
         printf("  -> CONTROL: full nozzle deflection commanded\n");
     }
 

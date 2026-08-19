@@ -134,7 +134,7 @@ Assert-Scenario (
     $unsafe37.sri2_status -eq "STOPPED" -and
     $unsafe37.sri1_failure_time -eq "36.928" -and
     $unsafe37.sri2_failure_time -eq "37.000" -and
-    $unsafe37.obc_input -eq "DIAGNOSTIC" -and
+    $unsafe37.obc_input -eq "FLIGHT" -and
     $unsafe37.nozzle_command -eq "FULL_DEFLECTION"
 ) "The two-SRI UNSAFE failure sequence at T+37 is not correct."
 
